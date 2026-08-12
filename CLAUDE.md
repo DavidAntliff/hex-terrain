@@ -50,6 +50,34 @@ as the code:
 - Cite file paths, not line numbers. Link liberally; a link to a page that doesn't exist yet is
   a stub worth recording in `spec/home.md`.
 
+## Architecture: keep the model out of the renderer
+
+A standing rule for this project, not a decision local to one feature.
+
+**The model is dimensionless.** `src/hex/` holds coordinates, topology and per-location data, and
+knows nothing of world units, scale, or which plane anything is drawn on. It has no Bevy types
+beyond `glam` vectors and is testable with no app.
+
+**A projection layer owns world units.** `src/view/layout.rs` is the only place a scale, an origin,
+or a plane exists. It converts model coordinates to world positions and back; the renderer and
+hit-testing both go through it.
+
+**The renderer consumes the two together** and adds nothing of its own that the model should know.
+
+When adding anything, ask: *would this still make sense with no renderer at all?* If yes it belongs
+in the model; if it involves a distance in world units, it belongs in the projection. Two mechanisms
+keep this honest rather than aspirational:
+
+- Model types deliberately **do not derive `Resource`**, so putting Bevy in the model is a compile
+  error. Newtypes in `view/` (`GridModel`) are the bridge.
+- A round-trip test run at **two different scales** fails if scale leaks into the model. Add the
+  equivalent for any new projection-dependent conversion.
+
+One nuance worth knowing, because it looks like a counterexample: `Orientation` lives in the *model*
+despite pointy-versus-flat being a rendering choice. It is dimensionless, and doubled coordinates
+depend on it, so the model needs it — the boundary is world units, not "anything visual". Its
+projection matrices stayed in the view layer. See `spec/hex-grid.md` → Design discussion.
+
 ## Conventions
 
 - **Comments describe the code, not the change.** Keep source comments specific to what the code
