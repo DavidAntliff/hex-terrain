@@ -33,6 +33,8 @@ Two directions of knowledge, deliberately kept apart:
 
 - [[hex-grid]]: the coordinate systems and grid model, plus the view that makes them visible —
   labels, axis compass, click selection, debug readout. `status: implemented`.
+- [[terrain]]: elevation as per-location data, drawn as hexagonal prisms — columns above the grid
+  plane, open pits below it — with surface-only picking and shadows. `status: implemented`.
 - [[scene]]: the scene shell — starfield skybox, orbit camera, clean exit, native and web build
   paths. `status: implemented`.
 
@@ -54,8 +56,6 @@ Two directions of knowledge, deliberately kept apart:
 Pages worth writing when the need arises. A `[[link]]` to a page that doesn't exist yet is
 fine — it marks one of these.
 
-- `terrain`: elevation and biome data. `Location`'s payload is an empty `Terrain` placeholder, so
-  the grid is already generic over it — this is the next real feature.
 - `hex-algorithms`: ranges, rotations, line drawing and pathfinding. The reference covers them all;
   none are implemented, and cube coordinates are in place to make them easy.
 - `camera-controls`: promote out of [[scene]] if the camera grows beyond orbit+zoom

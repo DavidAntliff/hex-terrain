@@ -85,11 +85,12 @@ impl GridPlane {
         }
     }
 
-    /// Componentwise scale that stretches a unit-sized mesh to `size` within this plane.
-    fn mesh_scale(self, size: Vec2) -> Vec3 {
+    /// Componentwise scale that stretches a unit-sized mesh to `size` within this plane and to
+    /// `elevation` along the normal.
+    fn mesh_scale(self, size: Vec2, elevation: f32) -> Vec3 {
         match self {
-            Self::Xz => Vec3::new(size.x, 1.0, size.y),
-            Self::Xy => Vec3::new(size.x, size.y, 1.0),
+            Self::Xz => Vec3::new(size.x, elevation, size.y),
+            Self::Xy => Vec3::new(size.x, size.y, elevation),
         }
     }
 }
@@ -101,6 +102,9 @@ pub struct HexLayout {
     /// Hex circumradius in world units. Two components allow squashed hexes; keep them equal for
     /// regular ones. Set it through [`HexLayout::with_scale`] unless you want them to differ.
     pub size: Vec2,
+    /// World units per unit of a location's dimensionless height — the second scaling knob, and
+    /// the only place elevation acquires a size.
+    pub height_scale: f32,
     pub origin: Vec3,
     pub plane: GridPlane,
 }
@@ -112,6 +116,9 @@ impl Default for HexLayout {
 }
 
 impl HexLayout {
+    /// The thinnest a location may be drawn, in world units. Small enough to read as flat.
+    pub const MIN_ELEVATION: f32 = 1e-3;
+
     /// A pointy-top layout on Bevy's ground plane, centred on the world origin.
     ///
     /// `scale` is the hexagon's circumradius — the centre-to-vertex distance — in world units.
@@ -119,14 +126,20 @@ impl HexLayout {
         Self {
             orientation: Orientation::Pointy,
             size: Vec2::splat(scale),
+            height_scale: 1.0,
             origin: Vec3::ZERO,
             plane: GridPlane::Xz,
         }
     }
 
-    /// The single scaling knob: sets both components of [`Self::size`].
+    /// The in-plane scaling knob: sets both components of [`Self::size`].
     pub fn with_scale(mut self, scale: f32) -> Self {
         self.size = Vec2::splat(scale);
+        self
+    }
+
+    pub fn with_height_scale(mut self, height_scale: f32) -> Self {
+        self.height_scale = height_scale;
         self
     }
 
@@ -151,14 +164,36 @@ impl HexLayout {
     pub fn unit(&self) -> Self {
         Self {
             size: Vec2::ONE,
+            height_scale: 1.0,
             origin: Vec3::ZERO,
             ..*self
         }
     }
 
-    /// Scale to apply to a mesh built by [`Self::unit`] so it matches this layout.
-    pub fn mesh_scale(&self) -> Vec3 {
-        self.plane.mesh_scale(self.size)
+    /// Scale to apply to a mesh built by [`Self::unit`] so it matches this layout at `height`.
+    ///
+    /// The elevation component is the *magnitude* of the height. A negative scale would mirror the
+    /// mesh and invert its facing, so a sunken location is a differently wound mesh rather than a
+    /// flipped one — see [`crate::view::grid_render`].
+    ///
+    /// It is also floored at [`Self::MIN_ELEVATION`]. A height of exactly zero is ordinary data —
+    /// any height field that crosses the plane produces one — but scaling a mesh to zero along an
+    /// axis makes its normal transform degenerate, and the cell renders black.
+    pub fn mesh_scale(&self, height: f32) -> Vec3 {
+        let elevation = (height.abs() * self.height_scale).max(Self::MIN_ELEVATION);
+        self.plane.mesh_scale(self.size, elevation)
+    }
+
+    /// World offset from the grid plane for a dimensionless height. Signed: positive rises along
+    /// the plane's normal, negative sinks below it.
+    pub fn elevation(&self, height: f32) -> Vec3 {
+        self.plane.normal() * (height * self.height_scale)
+    }
+
+    /// World position of the centre of a location's terrain surface — the top of a raised hex, the
+    /// floor of a sunken one. Where labels sit, what outlines trace, and what selection hits.
+    pub fn surface_centre(&self, coord: Axial, height: f32) -> Vec3 {
+        self.hex_to_world(coord) + self.elevation(height)
     }
 
     /// World position of a hex's centre.
@@ -270,6 +305,55 @@ mod tests {
                 assert_eq!(back, coord, "round trip failed at scale {scale}");
             }
         }
+    }
+
+    #[test]
+    fn surface_positions_round_trip_at_every_scale_and_height_scale() {
+        // The height-aware sibling of the test above, and the one that fails if the height scale
+        // ever leaks into the model: raising or sinking a hex must not change which hex it is.
+        for scale in [0.25, 1.0, 2.7] {
+            for height_scale in [0.1, 1.0, 12.0] {
+                let layout = HexLayout::pointy(scale).with_height_scale(height_scale);
+                for coord in grid_coords() {
+                    for height in [-0.8, 0.0, 0.6] {
+                        let surface = layout.surface_centre(coord, height);
+                        let back = layout.world_to_hex(surface).round().to_axial();
+                        assert_eq!(back, coord, "at scale {scale}, height scale {height_scale}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn elevation_is_linear_in_height_and_independent_of_hex_size() {
+        let layout = HexLayout::pointy(1.0).with_height_scale(3.0);
+        assert!(layout.elevation(2.0).abs_diff_eq(Vec3::Y * 6.0, EPS));
+        // Sign is preserved: a negative height sinks below the plane.
+        assert!(layout.elevation(-2.0).abs_diff_eq(Vec3::NEG_Y * 6.0, EPS));
+        // Hex size is the in-plane knob and has no say in elevation.
+        assert_eq!(layout.with_scale(40.0).elevation(2.0), layout.elevation(2.0));
+        // On the other plane the normal changes, not the magnitude.
+        let xy = layout.with_plane(GridPlane::Xy);
+        assert!(xy.elevation(2.0).abs_diff_eq(Vec3::Z * 6.0, EPS));
+    }
+
+    #[test]
+    fn mesh_scale_takes_the_height_magnitude_only() {
+        // A negative scale would mirror the mesh; sunken hexes get their own mesh instead.
+        let layout = HexLayout::pointy(2.0).with_height_scale(3.0);
+        assert_eq!(layout.mesh_scale(-0.5), layout.mesh_scale(0.5));
+        assert_eq!(layout.mesh_scale(0.5), Vec3::new(2.0, 1.5, 2.0));
+    }
+
+    #[test]
+    fn a_zero_height_still_has_thickness() {
+        // Scaling to zero along an axis makes the normal transform degenerate and the cell renders
+        // black, so a hex sitting exactly on the plane is floored rather than flattened.
+        let layout = HexLayout::pointy(1.0).with_height_scale(10.0);
+        assert_eq!(layout.mesh_scale(0.0).y, HexLayout::MIN_ELEVATION);
+        // The floor is not so large that it disturbs a real height.
+        assert_eq!(layout.mesh_scale(0.5).y, 5.0);
     }
 
     #[test]

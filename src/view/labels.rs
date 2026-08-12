@@ -78,11 +78,12 @@ pub fn spawn_labels(
     layout: Res<HexLayout>,
     mode: Res<LabelMode>,
 ) {
-    for coord in grid.coords() {
+    for location in grid.iter() {
+        let coord = location.coord;
         commands.spawn((
             HexLabel { coord },
             world_label(
-                layout.hex_to_world(coord),
+                layout.surface_centre(coord, location.data.height),
                 mode.format(coord, layout.orientation),
                 LABEL_SIZE,
                 LABEL_COLOR,
@@ -119,15 +120,21 @@ pub fn sync_label_visibility(
 }
 
 /// Re-anchors the labels when the layout changes, so they track a rescaled or reoriented grid.
+///
+/// Heights are static, so the layout is the only thing that can move a label.
 pub fn sync_label_anchors(
     layout: Res<HexLayout>,
+    grid: Res<GridModel>,
     mut labels: Query<(&HexLabel, &mut WorldLabel)>,
 ) {
     if !layout.is_changed() {
         return;
     }
     for (label, mut anchor) in &mut labels {
-        anchor.anchor = layout.hex_to_world(label.coord);
+        let Some(location) = grid.get(label.coord) else {
+            continue;
+        };
+        anchor.anchor = layout.surface_centre(label.coord, location.data.height);
     }
 }
 

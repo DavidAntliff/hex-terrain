@@ -2,21 +2,24 @@
 //! orbit camera, click selection and coordinate labels.
 
 use bevy::{
-    light::Skybox,
+    light::{CascadeShadowConfig, CascadeShadowConfigBuilder, Skybox},
     prelude::*,
     render::render_resource::{TextureViewDescriptor, TextureViewDimension},
 };
 
 use hex_terrain::camera::{self, place, Orbit};
-use hex_terrain::hex::{Terrain, TerrainGrid};
+use hex_terrain::hex::{undulating, TerrainGrid};
 use hex_terrain::screenshot::ScreenshotOnDemandPlugin;
 use hex_terrain::view::{GridModel, HexLayout, HexViewPlugin, GRID_RADIUS};
 
 /// Vertical 1x6 strip, wgpu face order: +X -X +Y -Y +Z -Z. See `tools/make_skybox.py`.
 const CUBEMAP: &str = "textures/starmap_cubemap.png";
 
-/// Hexagon circumradius in world units. The one scaling knob for the whole grid.
+/// Hexagon circumradius in world units. The in-plane scaling knob for the whole grid.
 const HEX_SCALE: f32 = 1.0;
+
+/// World units per unit of a location's height. The elevation knob, to `HEX_SCALE`'s in-plane one.
+const HEIGHT_SCALE: f32 = 1.5;
 
 fn main() {
     App::new()
@@ -29,8 +32,8 @@ fn main() {
             ..default()
         }))
         .add_plugins((HexViewPlugin, ScreenshotOnDemandPlugin))
-        .insert_resource(HexLayout::pointy(HEX_SCALE))
-        .insert_resource(GridModel(TerrainGrid::hexagon(GRID_RADIUS, |_| Terrain)))
+        .insert_resource(HexLayout::pointy(HEX_SCALE).with_height_scale(HEIGHT_SCALE))
+        .insert_resource(GridModel(TerrainGrid::hexagon(GRID_RADIUS, undulating)))
         .add_systems(Startup, setup)
         .add_systems(Update, (patch_cubemap, camera::orbit, exit_on_escape))
         .run();
@@ -40,14 +43,26 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((
         DirectionalLight {
             illuminance: 10_000.0,
+            // 0.19 spells it `shadow_maps_enabled`, not `shadows_enabled`.
+            shadow_maps_enabled: true,
             ..default()
         },
+        // The default is four cascades reaching 150 world units, which spends almost all of the
+        // shadow map on empty space around a grid a few units across. One cascade is also what
+        // WebGL2 is limited to, so native and web get the same picture.
+        CascadeShadowConfig::from(CascadeShadowConfigBuilder {
+            num_cascades: 1,
+            maximum_distance: 60.0,
+            ..default()
+        }),
         Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
+    // Fill light, so shadowed walls and the insides of pits stay readable instead of going black.
+    // The skybox contributes nothing, so without this there is only the one directional light.
     commands.insert_resource(GlobalAmbientLight {
         color: Color::srgb_u8(180, 190, 220),
-        brightness: 400.0,
+        brightness: 900.0,
         ..default()
     });
 
@@ -133,7 +148,7 @@ mod tests {
     /// The grid the app actually builds is the one the spec describes.
     #[test]
     fn the_scene_grid_is_a_hexagon_of_side_four() {
-        let grid = TerrainGrid::hexagon(GRID_RADIUS, |_| Terrain);
+        let grid = TerrainGrid::hexagon(GRID_RADIUS, undulating);
         assert_eq!(grid.len(), 37);
         assert!(grid.contains(Axial::ZERO));
     }

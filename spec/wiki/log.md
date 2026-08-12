@@ -48,3 +48,28 @@ Append-only, newest at the bottom. Keep the prefix consistent so it stays greppa
   every interior edge. Recorded in [[bevy-0-19-api]] with the other gizmo, camera and widget facts.
 - `place` no longer uses `looking_at`, which has no valid up vector at the pole; the rotation is built
   from yaw and pitch, so exactly vertical is now reachable.
+
+## [2026-08-12] feature | terrain height, prisms and pits
+
+- Wrote [[terrain]] (`status: implemented`): a signed dimensionless height on `Location`, a
+  `height_scale` on the projection, and one hexagonal prism per location — columns above the grid
+  plane, **open pits** below it. A pit omits the face at elevation zero, because a lid there is the
+  plane sealing the hole it is meant to be.
+- The sign cannot be a `Transform`: a negative scale mirrors the prism and turns every face the
+  wrong way out, and it keeps the cap a pit must not have. Two shared meshes, selected by sign.
+- Turning on back-face culling exposed that the old flat-sheet mesh had been wound backwards all
+  along, hidden by `cull_mode: None`. Now every face is wound to match its normal, asserted by a
+  test over both orientations, both planes and both forms.
+- Two rendering traps, both recorded in [[bevy-0-19-api]]: scaling a mesh to zero on an axis makes
+  its normal transform degenerate and the cell renders black — which the generator hits wherever
+  the wave crosses zero, hence `HexLayout::MIN_ELEVATION`; and the outlines' `depth_bias` had to
+  drop from `-0.1` to `-0.002`, since normalized depth is non-linear enough that the old value drew
+  lines straight through the prisms in front of them once the scene had any depth.
+- Selection stays arithmetic per [[hex-grid]], now against each location's own surface plane rather
+  than one shared plane. Walls are transparent to it, which is the requirement; pits become
+  selectable through their opening for free.
+- Shadows enabled on the directional light with one cascade over 60 units instead of the default
+  four over 150, and ambient fill raised so the darkest terrain tone measures `(30,35,47)` against
+  a lit `(91,100,123)` rather than `(20,23,33)`.
+- **Edited [[hex-grid]] with agreement** in three places it had gone wrong: the no-cull "flat sheet"
+  material, selection being a ray against *the* grid plane, and terrain data being out of scope.

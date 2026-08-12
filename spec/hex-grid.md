@@ -45,8 +45,8 @@ In scope: the three coordinate systems and their conversions, neighbours, distan
 rounding, the grid container and its hexagon-shaped constructor, the hex↔world projection, and the
 view (faces, outlines, selection, labels, compass, readout).
 
-Out of scope: terrain data itself (the payload is an empty placeholder), pathfinding, ranges and
-rotations, and offset coordinates.
+Out of scope: terrain data and everything elevation implies, which is [[terrain]]'s; pathfinding,
+ranges and rotations; and offset coordinates.
 
 ## Design discussion
 
@@ -85,10 +85,11 @@ its costs are no vector arithmetic and position-dependent neighbour tables. Reje
 no constructor taking three components. `q + r + s == 0` therefore cannot be violated, rather than
 being asserted after the fact.
 
-**Selection is arithmetic, not mesh picking.** A ray against the grid plane followed by
-`world_to_hex` and cube rounding reuses code the grid needs anyway, and keeps selection independent
-of how hexes are rendered. It does mean guarding against clicks that belong to the UI — see
-Implementation details. Locked.
+**Selection is arithmetic, not mesh picking.** A ray against a plane followed by `world_to_hex` and
+cube rounding reuses code the grid needs anyway, and keeps selection independent of how hexes are
+rendered. It does mean guarding against clicks that belong to the UI — see Implementation details.
+Locked. [[terrain]] kept the mechanism and changed only what the ray is tested against: one plane
+per location, at its own elevation, instead of a single plane for the whole grid.
 
 **Faces are meshes, outlines are gizmos.** Gizmos are immediate-mode, so changing which hex is
 highlighted costs nothing and needs no material swapping. Line width and depth bias are per config
@@ -141,7 +142,7 @@ coordinates.
 src/lib.rs           library root — the model/view split
 src/hex/coords.rs    Axial · Cube · Doubled · FractionalCube, conversions, neighbours, distance
 src/hex/grid.rs      Grid<T> · Location<T>, hexagon constructor, lookups
-src/hex/mod.rs       Terrain payload placeholder, TerrainGrid alias
+src/hex/mod.rs       Terrain payload, TerrainGrid alias — see [[terrain]]
 src/view/layout.rs   HexLayout — scale, origin, orientation, plane; hex↔world, corners, axes
 src/view/grid_render.rs  unit hex mesh, per-hex entities, outlines, highlight
 src/view/selection.rs    cursor ray → plane → hex
@@ -165,8 +166,9 @@ Details that are load-bearing:
 - **World-anchored labels are UI nodes** repositioned each frame from `Camera::world_to_viewport`,
   hidden with `Display::None` when the projection fails. One mechanism serves both the hex labels
   and the compass.
-- The material is `double_sided` with no culling: the grid is a single flat sheet, and showing it
-  from underneath beats having it vanish.
+- The material culls back faces. It was `double_sided` with no culling while the grid was a single
+  flat sheet, since showing that from underneath beat having it vanish; [[terrain]] made every cell
+  a solid prism, where each face has a meaningful side and the shadow pass wants the culling.
 - **Both outline gizmo groups carry a negative `depth_bias`**, because the lines are exactly coplanar
   with the faces they trace. Omitting it is a bug that hides: at an oblique angle enough of each line
   wins the depth test to look right, but from directly overhead every interior edge has a face on both
@@ -231,7 +233,8 @@ never been exercised for real.
 
 Deliberate omissions:
 
-- `Terrain` is an empty struct. Elevation and biome land there; the grid is already generic over it.
+- `Terrain` carries elevation and nothing else — see [[terrain]]. Biome and the rest land there too;
+  the grid is already generic over the payload.
 - No pathfinding, ranges, rotations or line drawing. The reference covers them; add when needed.
 - `GridPlane::Xy` exists and is tested but nothing constructs it in the app: it is there so the
   model's plane-agnosticism is real rather than aspirational.
@@ -244,5 +247,6 @@ Deliberate omissions:
 ## Related
 
 - [[hex-coordinates]]: the formulas as implemented, and the derivations behind them
+- [[terrain]]: the first payload on a location, and the prisms that draw it
 - [[scene]]: the shell this is displayed in
 - [[bevy-0-19-api]]: the Bevy APIs the view depends on

@@ -83,6 +83,12 @@ of it wins to look correct, but from directly overhead an interior edge has a fa
 identical depth and vanishes completely. What survives are the edges bordering empty space, so the
 result looks like a correct silhouette with no internal structure.
 
+**But `depth_bias` shifts normalized depth, which is steeply non-linear**, so the useful range is
+far smaller than it looks. `-0.1` is a huge pull toward the camera: it is invisible against a flat
+sheet with nothing to punch through, and the moment the scene gains any depth the same outlines
+draw straight through the geometry standing in front of them. `-0.002` still beats a coplanar face
+and stops there. Tune it against the deepest view, not the flattest.
+
 ## Cameras
 
 **`Transform::looking_at` has no valid up vector at the poles.** A camera directly above its target
@@ -96,6 +102,40 @@ field of view, and Bevy's `camera_system` keeps `aspect_ratio` in step with the 
 needed to frame content: the vertical extent depends on the field of view alone, the horizontal one
 also on the aspect ratio — which is why a widget placed beside the subject falls off-screen in a
 portrait window, and why a hand-tuned camera distance cannot be correct for all window shapes.
+
+## Lights and shadows
+
+**The field is `shadow_maps_enabled`, not `shadows_enabled`** (`bevy_light/src/directional_light.rs`).
+It defaults to `false`, so shadows are off until asked for. `contact_shadows_enabled` is a separate
+flag, and `soft_shadow_size` is behind the `experimental_pbr_pcss` feature.
+
+**`CascadeShadowConfigBuilder` is in no prelude** — import it from `bevy::light`. Its defaults are
+4 cascades (1 on WebGL2) reaching 150 world units, chosen to match Unity/Unreal/Godot. For a scene
+a few units across that spends nearly all of the shadow map on empty space; one cascade over a
+distance that actually bounds the scene is both sharper and identical to what the web build gets.
+
+**Ambient light is two types.** `GlobalAmbientLight` is the resource; `AmbientLight` is a component
+that `#[require(Camera)]`, i.e. per-view. Both are `{ color, brightness, affects_lightmapped_meshes }`.
+
+## Mesh primitives
+
+`Extrusion<T: Primitive2d>` exists and `Extrusion<RegularPolygon>` is `Meshable` and `Into<Mesh>`
+(`bevy_mesh/src/primitives/extrusion.rs`). Three things to know before reaching for it: it extrudes
+along **Z** and is centred on the origin (`half_depth` either side), its cap comes from
+`EllipseMeshBuilder`, which starts at `FRAC_PI_2` and so is always pointy-top in XY, and it is
+closed at both ends. A Y-up prism therefore needs a rotation and an offset, a flat-top hexagon is
+out of reach, and an open-ended prism is not expressible at all.
+
+For a hand-built mesh, **wind each face so that `(v1 - v0) × (v2 - v0)` is the normal it stores** —
+that cross product is what back-face culling compares against. `cull_mode: None` hides the mistake
+completely, so a mesh built under it can be wound backwards for as long as it stays double-sided
+and will disappear the moment culling is turned on. A cheap unit test comparing the two per triangle
+catches it without a renderer.
+
+**Scaling a mesh to zero on one axis renders it black.** The normal transform is the inverse
+transpose of the model matrix, which a zero scale makes degenerate, so the shading normals come out
+unusable. Height fields hit this the moment a value lands exactly on the base plane. Floor the scale
+at a small positive value rather than special-casing the data.
 
 ## UI widgets
 
@@ -116,8 +156,6 @@ world-space picking code — see `Hovered` below.
 - **`Assets::get_mut` returns a guard**, not a plain `&mut`, so it needs `let mut image = …`.
   It also flags the asset modified on access — check a condition through the immutable `get`
   first, or a per-frame `get_mut` will re-upload the texture every frame.
-- **`GlobalAmbientLight`** is the ambient-light resource name (inserted with
-  `commands.insert_resource`).
 - **Examples are written in BSN.** 0.19's `examples/3d/3d_scene.rs` uses the new scene notation
   (`bsn_list!`, `asset_value`, `template_value`). Plain `commands.spawn((..))` still works and
   is what `examples/3d/skybox.rs` uses — don't conclude from one example that the old API is

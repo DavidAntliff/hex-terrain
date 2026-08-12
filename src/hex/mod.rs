@@ -15,13 +15,42 @@ pub use coords::{Axial, Cube, Doubled, FractionalCube, DIRECTIONS};
 pub use grid::{Grid, Location};
 pub use orientation::Orientation;
 
-/// Per-location payload.
-///
-/// Empty for now — the extension point for elevation, biome, ownership and anything else a hex
-/// needs to carry. It exists as a named type so the grid's payload can grow without changing
-/// every signature that mentions it.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Terrain;
+/// Per-location payload. The extension point for biome, ownership and anything else a hex needs
+/// to carry; so far, elevation.
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub struct Terrain {
+    /// Elevation as a dimensionless level, signed and roughly `-1..=1`. Zero is the grid plane;
+    /// positive rises above it, negative sinks below. What a level is worth in world units is
+    /// [`crate::view::layout::HexLayout`]'s business, not the model's.
+    pub height: f32,
+}
 
 /// The grid the scene displays: a hexagon of side 4 (radius 3, 37 locations).
 pub type TerrainGrid = Grid<Terrain>;
+
+/// Placeholder terrain: one sinusoid along each axis, giving a wave that crosses the grid plane.
+///
+/// Centred on zero rather than lifted clear of it, so the grid has troughs as well as peaks. The
+/// frequency puts about one full period across a radius-3 grid.
+pub fn undulating(coord: Axial) -> Terrain {
+    const FREQUENCY: f32 = 0.9; // radians per hex step
+    let (q, r) = (coord.q as f32, coord.r as f32);
+    Terrain {
+        height: 0.5 * ((q * FREQUENCY).sin() + (r * FREQUENCY).sin()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_undulation_stays_in_range_and_crosses_the_plane() {
+        let grid = Grid::hexagon(3, undulating);
+        let heights: Vec<f32> = grid.iter().map(|l| l.data.height).collect();
+        assert!(heights.iter().all(|h| (-1.0..=1.0).contains(h)));
+        // Both signs, or there would be no pits to render.
+        assert!(heights.iter().any(|&h| h > 0.1), "no peaks: {heights:?}");
+        assert!(heights.iter().any(|&h| h < -0.1), "no troughs: {heights:?}");
+    }
+}
