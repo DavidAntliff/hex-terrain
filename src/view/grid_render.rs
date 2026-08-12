@@ -1,16 +1,20 @@
 //! Draws the grid as a continuous surface, one cell at a time.
 //!
 //! A location's territory is its **full** hexagon. Its cap is that hexagon shrunk by [`INSET`] and
-//! lifted to the location's height; the ring between the two is its wall. Two concentric similar
-//! hexagons have corresponding corners, so that ring tiles exactly with six quads — one per edge,
-//! no corner pieces, and no rule deciding which cell owns what. Every cell emits the same eighteen
-//! triangles.
+//! lifted to the location's height; the ring between the two is its wall, and every cell emits the
+//! same thirty triangles with no rule deciding who owns what.
 //!
-//! What joins the cells is the **fence**: the outer ring of each cell sits on the full hexagon's
-//! corners, at the mean of the heights of the locations present at that point of the lattice. Two
-//! neighbours compute the same mean for each end of their shared edge, so their walls meet
-//! vertex-for-vertex and the surface is continuous. Nothing anywhere refers to the grid plane, so a
-//! location below it is simply a dip.
+//! The gaps an inset hexagon leaves are of two kinds, and so is the wall. Along each edge sits a
+//! **bridge**, half of the ramp down to the neighbour's cap, level along its length at the mean of
+//! the two heights. At each corner sits a **wedge**, one third of the triangle joining the three
+//! caps that meet at that point of the lattice.
+//!
+//! Both rules are symmetric, so two cells compute the same heights for the geometry they share and
+//! the surface is continuous. Keeping the bridge at the *pairwise* mean is what makes it level
+//! between two equal neighbours: putting its far edge on the lattice vertices instead dragged it up
+//! towards whatever tall third cell happened to touch a corner, and warped it enough that its two
+//! triangles shaded differently. Nothing anywhere refers to the grid plane, so a location below it
+//! is simply a dip.
 //!
 //! Cap and wall are separate meshes because the cap is identical for every location — one shared
 //! asset moved by a `Transform` — while the wall depends on the neighbours' heights and so is
@@ -229,8 +233,16 @@ fn cap_mesh(layout: &HexLayout) -> Mesh {
     faces.build()
 }
 
-/// The ring joining one location's cap to its neighbours': six quads from the inset cap edge out to
-/// the fence on the full hexagon's corners.
+/// The ring joining one location's cap to its neighbours', filling exactly the part of the
+/// location's hexagon its cap does not cover.
+///
+/// Two kinds of piece, because the gaps an inset hexagon leaves are of two kinds. Along each edge a
+/// **bridge**, half of the ramp between this cap and the neighbour's, level along its length at the
+/// mean of the two heights. At each corner a **wedge**, one third of the triangle joining the three
+/// caps that meet at that point of the lattice, cut at its centroid.
+///
+/// Both are planar by construction — a bridge spans two parallel level edges, and a wedge is a piece
+/// of the plane through three points — so a wall is flat-shaded without a crease running across it.
 ///
 /// Built in the unit frame with dimensionless heights, so the cell's `Transform` supplies both the
 /// hex size and the height scale and nothing here has to be rebuilt when either changes.
@@ -239,37 +251,68 @@ fn wall_mesh(layout: &HexLayout, grid: &TerrainGrid, coord: Axial) -> Mesh {
     let corners = unit.corner_offsets();
     let up = unit.plane.normal();
     let height = grid.get(coord).map_or(0.0, |l| l.data.height);
-    let fence: [f32; 6] = core::array::from_fn(|j| fence_height(layout, grid, coord, j));
 
-    let mut faces = Faces::with_capacity(12);
+    let cap: [Vec3; 6] = core::array::from_fn(|j| corners[j] * (1.0 - INSET) + up * height);
+    // Edge `j` runs from corner `j` to corner `j + 1`.
+    let edge: [f32; 6] = core::array::from_fn(|j| edge_height(layout, grid, coord, j));
+    let corner: [f32; 6] = core::array::from_fn(|j| corner_height(layout, grid, coord, j));
+
+    // Where a bridge's far edge meets the hexagon's edge, near corner `j` of edge `j..k`: the
+    // midpoint of this cap's corner and the neighbour cap's, which lands on the shared edge short
+    // of the lattice vertex by the same inset.
+    let bridge_end = |j: usize, k: usize, elevation: f32| {
+        corners[j] * (1.0 - INSET / 2.0) + corners[k] * (INSET / 2.0) + up * elevation
+    };
+
+    let mut faces = Faces::with_capacity(24);
     for j in 0..6 {
-        let k = (j + 1) % 6;
-        let inner = [corners[j], corners[k]].map(|c| c * (1.0 - INSET) + up * height);
-        let outer = [corners[j] + up * fence[j], corners[k] + up * fence[k]];
-        faces.push_flat([inner[0], inner[1], outer[1]]);
-        faces.push_flat([inner[0], outer[1], outer[0]]);
+        let (k, previous) = ((j + 1) % 6, (j + 5) % 6);
+
+        // The bridge: level along the edge, so two equal neighbours are joined by a level ramp no
+        // matter how tall anything else touching their corners is.
+        let near = bridge_end(j, k, edge[j]);
+        let far = bridge_end(k, j, edge[j]);
+        faces.push_flat([cap[j], cap[k], far]);
+        faces.push_flat([cap[j], far, near]);
+
+        // The wedge, between the two bridges either side of corner `j` and reaching the lattice
+        // vertex itself.
+        let vertex = corners[j] + up * corner[j];
+        faces.push_flat([cap[j], near, vertex]);
+        faces.push_flat([cap[j], vertex, bridge_end(j, previous, edge[previous])]);
     }
     faces.build()
 }
 
-/// The height of the fence at one corner of a location: the mean over the locations present at that
-/// point of the lattice, which is at most this one and the two neighbours sharing the corner.
+/// The height of a bridge along one edge: the mean of this location and the one across it.
+fn edge_height(layout: &HexLayout, grid: &TerrainGrid, coord: Axial, edge: usize) -> f32 {
+    let direction = layout.corner_directions(edge).0;
+    mean_height(grid, &[coord, coord.neighbour(direction)])
+}
+
+/// The height at one corner of a location: the mean over the locations present at that point of the
+/// lattice, which is at most this one and the two neighbours sharing the corner.
+fn corner_height(layout: &HexLayout, grid: &TerrainGrid, coord: Axial, corner: usize) -> f32 {
+    let (a, b) = layout.corner_directions(corner);
+    mean_height(grid, &[coord, coord.neighbour(a), coord.neighbour(b)])
+}
+
+/// The mean height over whichever of `coords` the grid actually holds.
 ///
 /// Averaging over what is **present**, rather than standing in a value for what is absent, is what
-/// keeps the surface closed. Each of the up-to-three cells meeting here computes this same mean, so
-/// their walls land on exactly the same point; substituting each cell's own height for a missing
-/// neighbour would have them disagree and split the seam open. At the edge of the grid the mean is
-/// over fewer cells, which is why a boundary hex ends in a level lip and a lone one is a flat plate.
-fn fence_height(layout: &HexLayout, grid: &TerrainGrid, coord: Axial, corner: usize) -> f32 {
-    let (a, b) = layout.corner_directions(corner);
-    let mut present: Vec<(Axial, f32)> = [coord, coord.neighbour(a), coord.neighbour(b)]
-        .into_iter()
-        .filter_map(|c| grid.get(c).map(|l| (c, l.data.height)))
+/// keeps the surface closed. Every cell meeting at a point computes this same mean, so their walls
+/// land on exactly the same place; substituting each cell's own height for a missing neighbour would
+/// have them disagree and split the seam open. At the edge of the grid the mean is over fewer cells,
+/// which is why a boundary hex ends in a level lip and a lone one is a flat plate.
+fn mean_height(grid: &TerrainGrid, coords: &[Axial]) -> f32 {
+    let mut present: Vec<(Axial, f32)> = coords
+        .iter()
+        .filter_map(|c| grid.get(*c).map(|l| (*c, l.data.height)))
         .collect();
 
     // Summed in coordinate order, not in the order they were found. Floating-point addition is not
-    // associative, so without this the three cells meeting here would each get a slightly different
-    // answer and crack the surface at exactly the vertices that are hardest to look at.
+    // associative, so without this the three cells meeting at a corner would each get a slightly
+    // different answer and crack the surface at exactly the vertices that are hardest to look at.
     present.sort_unstable_by_key(|(c, _)| (c.q, c.r));
     present.iter().map(|(_, h)| h).sum::<f32>() / present.len() as f32
 }
@@ -404,18 +447,17 @@ mod tests {
         }
     }
 
-    /// The money test for the whole scheme: wherever two cells meet the lattice at the same point,
-    /// they must put their fence at exactly the same height, or the surface splits open along that
-    /// edge. Bitwise equality — the mean is summed in coordinate order precisely so that every cell
-    /// meeting at a point gets an identical answer, not merely a close one.
+    /// The money test for the whole scheme: wherever two cells meet, they must put their shared
+    /// geometry at exactly the same height, or the surface splits open. Bitwise equality — the mean
+    /// is summed in coordinate order precisely so that every cell meeting at a point gets an
+    /// identical answer, not merely a close one.
     #[test]
-    fn cells_agree_on_every_shared_lattice_point() {
+    fn cells_agree_on_every_shared_edge_and_corner() {
         let grid = grid();
         for layout in layouts() {
             for coord in grid.coords() {
                 let corners = layout.corners(coord);
                 for (j, position) in corners.iter().enumerate() {
-                    let mine = fence_height(&layout, &grid, coord, j);
                     let (a, b) = layout.corner_directions(j);
                     for direction in [a, b] {
                         let neighbour = coord.neighbour(direction);
@@ -429,12 +471,57 @@ mod tests {
                             .position(|c| c.abs_diff_eq(*position, EPS))
                             .expect("neighbours share the corner");
                         assert_eq!(
-                            mine,
-                            fence_height(&layout, &grid, neighbour, theirs),
+                            corner_height(&layout, &grid, coord, j),
+                            corner_height(&layout, &grid, neighbour, theirs),
                             "{coord:?} corner {j} disagrees with {neighbour:?} corner {theirs}"
                         );
+                        // And the bridge they share: `a` is the edge starting at this corner.
+                        if direction == a {
+                            let back = (direction + 3) % 6;
+                            let their_edge = (0..6)
+                                .find(|&e| layout.corner_directions(e).0 == back)
+                                .expect("the edge back this way");
+                            assert_eq!(
+                                edge_height(&layout, &grid, coord, j),
+                                edge_height(&layout, &grid, neighbour, their_edge),
+                                "{coord:?} edge {j} disagrees with {neighbour:?}"
+                            );
+                        }
                     }
                 }
+            }
+        }
+    }
+
+    /// The artefact that prompted this construction: a bridge between two locations of equal height
+    /// must be level, however tall the cells touching its ends are. Putting the wall's far edge at
+    /// the corner mean instead dragged it up towards whichever tall neighbour shared a corner, and
+    /// warped the quad enough that its two triangles shaded differently.
+    #[test]
+    fn a_bridge_between_equal_neighbours_is_level() {
+        let layout = HexLayout::pointy(1.0);
+        let up = layout.plane.normal();
+        let (left, right) = (Axial::ZERO, Axial::new(1, 0));
+        let mut grid: TerrainGrid = Grid::new();
+        grid.insert(Location::new(left, Terrain { height: 0.0 }));
+        grid.insert(Location::new(right, Terrain { height: 0.0 }));
+        // A tall cell on one of the corners the two share.
+        for direction in 0..6 {
+            let third = left.neighbour(direction);
+            if third != right && third.distance(right) == 1 {
+                grid.insert(Location::new(third, Terrain { height: 2.0 }));
+            }
+        }
+
+        let edge = (0..6)
+            .find(|&e| layout.corner_directions(e).0 == 0)
+            .expect("the edge facing +q");
+        assert_eq!(edge_height(&layout, &grid, left, edge), 0.0);
+
+        // And the flat-shaded wall says the same: no triangle of the bridge tilts.
+        for (tri, normal) in triangles(&wall_mesh(&layout, &grid, left)) {
+            if tri.iter().all(|v| v.dot(up).abs() < EPS) {
+                assert!(normal.abs_diff_eq(up, EPS), "a level piece should face straight up");
             }
         }
     }
@@ -468,7 +555,7 @@ mod tests {
 
         let mesh = wall_mesh(&layout, &grid, Axial::ZERO);
         let brim = triangles(&mesh);
-        assert_eq!(brim.len(), 12, "six quads");
+        assert_eq!(brim.len(), 24, "six bridges and six wedges");
         for (tri, _) in brim {
             for v in tri {
                 assert!((v.y - -0.4).abs() < EPS, "{v:?} should be level with the cap");

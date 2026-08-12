@@ -68,18 +68,31 @@ sign of a height becomes nothing but a vertex position. Locked.
 
 **A cap is inset and its wall is the ring around it.** Shrinking the cap while leaving the spacing
 alone is what opens up a visible wall between neighbours, and gives it an incline even where two
-heights match. Because the inset hexagon and the full hexagon are *similar*, the ring between them
-tiles exactly with six quads — one per edge, no corner pieces. Locked.
+heights match. Locked.
 
-**The fence is the mean over the locations present at a lattice point.** Each cell's wall reaches
-out to the corners of its full hexagon, at the mean of the heights of the up-to-three locations
-meeting there. Two neighbours compute the same mean at each end of their shared edge, so their
-walls land on the same points and the surface is closed.
+**The wall has two kinds of piece, because the gaps have two shapes.** An inset hexagon leaves a
+strip along each edge and a triangle at each corner. So the wall is six **bridges**, each half of
+the ramp to a neighbour's cap, and six **wedges**, each a third of the triangle joining the three
+caps meeting at a lattice vertex, cut at its centroid. Locked.
 
-Averaging over what is *present* is the part that matters. Substituting a stand-in height for an
-absent neighbour would have each side of the boundary substitute a different one, and the seam
-would split along the whole rim. Averaging over the present cells also gives the grid's edge its
-level lip and makes a lone location a flat plate, with no special case. Locked.
+**A bridge is level along its length, at the mean of the two heights either side.** This is the
+rule the construction turns on, and getting it wrong is what a first attempt did: it put the wall's
+far edge on the lattice *vertices*, at the mean over the three cells meeting there. That looks like
+a simplification — the ring then tiles with six quads and the wedges vanish — but it is wrong twice
+over. A bridge between two equal neighbours was dragged up at whichever end a tall third cell
+touched, raising a wall where the ground should have been flat; and the quad was left non-planar,
+so its two triangles shaded differently and a diagonal crease ran across every wall, worst exactly
+where the height difference was largest.
+
+With the pairwise mean along edges and the triple mean only at the vertices, every piece is planar
+by construction — a bridge spans two parallel level edges, a wedge is a piece of the plane through
+three points — so the walls are flat-shaded without creases, and equal neighbours are joined by
+level ground. Locked.
+
+**Both means are over the locations *present*.** Substituting a stand-in height for an absent
+neighbour would have each side of a boundary substitute a different one, and the seam would split
+along the whole rim. Averaging over what is there also gives the grid's edge its level lip and makes
+a lone location a flat plate, with no special case. Locked.
 
 **Ownership is per location, and the split is the midline.** Every cell emits the same eighteen
 triangles covering exactly its own hexagon. The alternative — one stitched mesh for the whole grid,
@@ -155,12 +168,14 @@ Details that are load-bearing:
   an upward-facing fan iterates it backwards. A test asserts this over both orientations and both
   planes; the flat-sheet mesh this feature replaced was wound the other way and got away with it
   only because the material disabled culling.
-- **The fence mean is summed in coordinate order.** Floating-point addition is not associative, so
+- **The corner mean is summed in coordinate order.** Floating-point addition is not associative, so
   the three cells meeting at a lattice point would otherwise each get an answer an ulp apart and
-  crack the surface at exactly the vertices hardest to inspect.
-- **A wall quad is not planar** — its outer corners sit at different fence heights — so its two
-  triangles shade differently and a crease runs across each wall. That is the honest geometry, and
-  the wall material is only slightly darker than the cap's so the crease does not read as a gash.
+  crack the surface at exactly the vertices hardest to inspect. A bridge needs no such care, since
+  addition of its two heights is commutative.
+- **A bridge's far edge stops short of the lattice vertex**, at the midpoint of this cap's corner
+  and the neighbour's — which lies on the shared edge, inset from the vertex by the same fraction.
+  The wedge fills what is left, out to the vertex itself. Together they cover the cell's hexagon
+  exactly.
 - **The outline gizmos' depth bias had to shrink by fifty times**, to `-0.002`. It is still needed,
   because an outline is exactly coplanar with the cap it traces, but depth bias shifts normalized
   depth — which is steeply non-linear — so the old `-0.1` pulled lines far enough forward to draw
@@ -184,10 +199,14 @@ Details that are load-bearing:
 - Mesh: every triangle's geometric normal matches its stored normal, over both planes × both
   orientations × every location. Caps are exactly level and nothing faces downwards, since a terrain
   does not overhang. Each cell's geometry reaches exactly the circumradius and no further, so a
-  location's mesh really is its own hexagon. A location with no neighbours comes out as a flat plate.
-- The seam: wherever two locations meet the lattice at the same point, their fences agree
-  **bitwise**. This is the test the whole scheme rests on — it exercises the corner mapping, the
-  mean rule and the summation order at once, and it is why the mean is summed in coordinate order.
+  location's mesh really is its own hexagon. A location with no neighbours comes out as a flat plate
+  of 24 wall triangles.
+- The seam: wherever two locations meet, their shared bridge and corner heights agree **bitwise**.
+  This is the test the whole scheme rests on — it exercises the corner mapping, both mean rules and
+  the summation order at once, and it is why the corner mean is summed in coordinate order.
+- A bridge between two equal-height neighbours is level, and stays level with a cell twice their
+  height on one of the corners they share. This is the regression test for the artefact above: it
+  fails against the lattice-vertex rule and passes against the pairwise one.
 - Selection: looking straight down picks the hex below at two height scales, at the centre and 80%
   of the way to a corner; a shallow ray crossing a low cell's airspace and a tall one's east wall
   picks the tall one; a ray passing just over it and away picks nothing.
