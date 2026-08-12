@@ -42,11 +42,12 @@ fill that shadowed walls stay legible.
 ### Functional requirements
 
 In scope: the height attribute and its placeholder generator, the world-unit height scale, the cap
-and wall meshes and the rule that joins them, cap-anchored labels and outlines, picking by
-footprint, and shadows with ambient fill.
+and wall meshes and the rule that joins them, per-location water surfaces, cap-anchored labels and
+outlines, picking by footprint, and shadows with ambient fill.
 
 Out of scope: real terrain generation (the sinusoid is a placeholder), height editing at runtime,
-biome or any other payload, per-height colouring, and water.
+biome or any other payload, per-height colouring, and anything that makes water behave rather than
+merely sit there — flow, waves, transparency, refraction.
 
 ## Design discussion
 
@@ -119,6 +120,22 @@ a click on the wall belongs to the cell it is nearer. The imprecision is that ov
 tested plane sits at the cap's height rather than on the incline — a few pixels, and only at
 grazing angles.
 
+**Water is a per-location level, and the depth buffer cuts the shoreline.** A location carries the
+surface level of the water covering it, or nothing — per location rather than global, so a mountain
+lake can stand above the sea it drains into. It draws as an opaque hexagon at full width covering
+the location's whole territory, and the terrain occludes it wherever the ground is higher. The
+coastline therefore appears exactly where the terrain surface crosses the level, with no clipping,
+no shoreline geometry and no seam to get wrong.
+
+**A water surface reaches one ring past the locations that are flooded, and that is provably
+enough.** A location's territory includes half of each bridge, at the mean of the two heights, so a
+dry location beside a flooded one dips below the water line near their shared edge even though its
+own cap stands clear. Without a plate there, the water's edge would stop at the shared edge and
+hang in mid-air over submerged ground. Its plate sits below its own cap and is invisible except
+over exactly that strip. Two rings are never needed: if neither a location nor any neighbour is
+flooded then every height around it is above the line, so every bridge and wedge is above it too.
+Locked.
+
 **Rejected: `Extrusion<RegularPolygon>`.** Bevy 0.19 has it, and it is `Meshable`. But it is
 centred on the origin, extrudes along `+Z`, its cap is always pointy-top in the XY plane, and it
 is closed on both ends. Even for the prisms it would have meant a rotation, an offset, no flat-top
@@ -180,8 +197,15 @@ Details that are load-bearing:
   because an outline is exactly coplanar with the cap it traces, but depth bias shifts normalized
   depth — which is steeply non-linear — so the old `-0.1` pulled lines far enough forward to draw
   straight through the cells in front of them. See [[bevy-0-19-api]].
+- **A water surface is lifted by a hair above its stated level.** Ground can sit *exactly* at its
+  own water line — the placeholder generator puts a whole diagonal at precisely zero — and a plate
+  coplanar with a cap is an exact depth tie that z-fights in fans radiating from the cell centres.
+  `StandardMaterial::depth_bias` does not fix it: despite its documentation it only feeds the
+  render-phase sort key, and the mesh pipeline hardcodes a zero rasterizer bias. See
+  [[bevy-0-19-api]]. The consequence is that ground exactly at the water line reads as submerged.
 - **Picking tests cap planes only, and walls do not occlude.** At a grazing angle a low cap hidden
-  behind a taller neighbour can still be picked; marked in the source as a known ceiling.
+  behind a taller neighbour can still be picked; marked in the source as a known ceiling. Water is
+  not picked at all, so clicking a lake selects the location beneath it.
 - Heights are static, so `sync_cells` only runs when the layout changes, and then rebuilds
   everything rather than working out which field moved.
 
@@ -207,6 +231,9 @@ Details that are load-bearing:
 - A bridge between two equal-height neighbours is level, and stays level with a cell twice their
   height on one of the corners they share. This is the regression test for the artefact above: it
   fails against the lattice-vertex rule and passes against the pairwise one.
+- Water: the generator floods exactly what lies below sea level, and a surface appears on a flooded
+  location and on each of its neighbours — but not one ring further out, which is the check that the
+  shoreline is covered without water spreading over dry ground.
 - Selection: looking straight down picks the hex below at two height scales, at the centre and 80%
   of the way to a corner; a shallow ray crossing a low cell's airspace and a tall one's east wall
   picks the tall one; a ray passing just over it and away picks nothing.
@@ -234,6 +261,14 @@ Deliberate omissions:
   a raised rim cell shows sky beneath it at a low angle.
 - One inset for the whole grid, not per location; and no per-height colouring or height in the debug
   readout — the readout's world position is still the hex centre on the plane, not the cap.
+- **Water is a flat glossy plate and nothing more.** It reads as painted blue rather than as water,
+  because a smooth plane under one directional light with no environment map has nothing to reflect.
+  Static ripple normals over a subdivided plate would be the cheapest improvement; an
+  `EnvironmentMapLight` would be the largest, and needs the prefiltered map [[scene]] already wants.
+- Nothing stops two adjacent locations carrying different water levels with ground between them
+  below both, which would render as a step in the water. Real bodies at different levels are
+  separated by ground above them both, so the data has to be sensible rather than the renderer
+  policing it.
 - `view/framing.rs` still computes the camera's extent from plane-level corners, ignoring height.
   Harmless for the top-down reset view; an oblique computed framing would need the extra extent.
 - Walls do not occlude picking (above).

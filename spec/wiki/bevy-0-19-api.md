@@ -117,6 +117,23 @@ distance that actually bounds the scene is both sharper and identical to what th
 **Ambient light is two types.** `GlobalAmbientLight` is the resource; `AmbientLight` is a component
 that `#[require(Camera)]`, i.e. per-view. Both are `{ color, brightness, affects_lightmapped_meshes }`.
 
+## `StandardMaterial::depth_bias` will not stop z-fighting
+
+Its own doc comment says it "affects render ordering and depth write operations using the
+`wgpu::DepthBiasState::Constant` field" (`bevy_pbr/src/pbr_material.rs`). Only the first half is
+true. The value is copied into the render-phase item's **sort key** (`bevy_pbr/src/material.rs`,
+where `PreparedMaterial` is queued), while the mesh pipeline hardcodes
+
+```rust
+bias: DepthBiasState { constant: 0, slope_scale: 0.0, clamp: 0.0 }   // bevy_pbr/src/render/mesh.rs
+```
+
+so nothing reaches the rasterizer. Reordering two **opaque** draws changes nothing, since the depth
+test decides. Two coplanar opaque meshes therefore z-fight however large a `depth_bias` is set, and
+the fix has to be geometric: separate them by an epsilon. Gizmos are the exception — their
+`depth_bias` is a real depth offset, which is why the grid outlines can be biased over the faces
+they trace.
+
 ## Mesh primitives
 
 `Extrusion<T: Primitive2d>` exists and `Extrusion<RegularPolygon>` is `Meshable` and `Into<Mesh>`

@@ -100,3 +100,31 @@ Append-only, newest at the bottom. Keep the prefix consistent so it stays greppa
   index, so a mistake would show in flat-top only. Derived and recorded in [[hex-coordinates]], and
   tested by re-deriving it from corner positions rather than by asserting a table.
 - The surface is a bare shell by choice: no skirt, no underside, so it is see-through from below.
+
+## [2026-08-12] fix | walls of bridges and wedges
+
+- The wall was six quads reaching to the lattice vertices, each carrying the mean of the three cells
+  meeting there. Wrong twice: a bridge between two *equal* locations was dragged up at whichever end
+  a tall third cell touched, and the quad was left non-planar so a diagonal crease ran across every
+  wall. Both were plainly visible; neither was caught by a test, because the suite checked winding,
+  seam agreement and footprint, all of which the broken construction satisfied.
+- Now a **bridge** per edge at the pairwise mean, level along its length, and a **wedge** per corner,
+  a third of the planar triangle joining the three caps. Both planar by construction. Thirty
+  triangles per cell rather than eighteen — the eighteen was the mistake, not a saving.
+- Regression test: two equal-height locations with a cell twice their height on a shared corner.
+
+## [2026-08-12] feature | water
+
+- `Terrain` gains `water: Option<f32>`, a surface level in the same units as a height, per location
+  so a mountain lake can stand above the sea. The placeholder generator floods below [[terrain]]'s
+  sea level.
+- Drawn as an opaque full-width hexagon, with the **terrain occluding it** wherever the ground is
+  higher — so the coastline falls out of the depth buffer and needs no clipping or shoreline
+  geometry. The plate reaches **one ring** past the flooded locations, which is provably exactly
+  right: a dry neighbour's half-bridge dips below the water line, and anything further out cannot.
+- **`StandardMaterial::depth_bias` does not stop z-fighting** — it only feeds the phase sort key,
+  and the mesh pipeline hardcodes a zero rasterizer bias, so it does nothing for opaque draws. The
+  coplanar case is real here because a whole diagonal of the placeholder grid sits at exactly zero.
+  Fixed geometrically with a hair of lift. Recorded in [[bevy-0-19-api]].
+- Honest limitation: it reads as flat blue paint, since a smooth plane under one directional light
+  with no environment map has nothing to reflect.

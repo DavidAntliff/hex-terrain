@@ -106,8 +106,8 @@ mod tests {
         let layout = HexLayout::pointy(1.0);
         let (column, pit) = (Axial::ZERO, Axial::new(1, 0));
         let mut grid: TerrainGrid = Grid::new();
-        grid.insert(Location::new(column, Terrain { height: 3.0 }));
-        grid.insert(Location::new(pit, Terrain { height: -1.0 }));
+        grid.insert(Location::new(column, Terrain { height: 3.0, water: None }));
+        grid.insert(Location::new(pit, Terrain { height: -1.0, water: None }));
 
         // Straight down over the column: the column, not the plane it stands on.
         let top = layout.surface_centre(column, 3.0);

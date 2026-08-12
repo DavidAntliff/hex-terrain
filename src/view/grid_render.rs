@@ -48,6 +48,16 @@ pub struct Highlight;
 
 const CAP_FILL: Color = Color::srgb(0.16, 0.19, 0.26);
 const WALL_FILL: Color = Color::srgb(0.13, 0.16, 0.22);
+const WATER_FILL: Color = Color::srgb(0.06, 0.20, 0.34);
+
+/// How far a water surface is lifted above its stated level, in dimensionless height.
+///
+/// Ground can sit *exactly* at its own water line — this grid has a whole diagonal at precisely
+/// zero — and a plate coplanar with a cap is an exact depth tie, which z-fights in fans radiating
+/// from the cell centres. `StandardMaterial::depth_bias` does not help: despite its documentation
+/// it only feeds the render-phase sort key, and the mesh pipeline hardcodes a zero rasterizer bias.
+/// So the tie is broken in geometry instead, by a nudge far below anything visible.
+const WATER_LIFT: f32 = 0.002;
 const EDGE: Color = Color::srgb(0.35, 0.75, 0.85);
 const ACTIVE_EDGE: Color = Color::srgb(1.0, 0.78, 0.25);
 
@@ -78,12 +88,15 @@ pub struct HexWall {
     coord: Axial,
 }
 
-/// The one cap mesh every location shares.
+/// The two hexagon fans every location shares: its cap, inset, and its water surface, full width.
 ///
-/// Held so an orientation change can rewrite it in place: corner angles differ between pointy and
+/// Held so an orientation change can rewrite them in place: corner angles differ between pointy and
 /// flat, which a `Transform` cannot express. Scale and height-scale changes need no rebuild.
 #[derive(Resource)]
-pub struct CapMesh(Handle<Mesh>);
+pub struct SharedMeshes {
+    cap: Handle<Mesh>,
+    water: Handle<Mesh>,
+}
 
 /// Both outline groups need a negative depth bias, because the lines are exactly coplanar with the
 /// cap they trace and would otherwise z-fight with it.
@@ -109,8 +122,10 @@ pub fn spawn_grid(
     grid: Res<GridModel>,
     layout: Res<HexLayout>,
 ) {
-    let cap = meshes.add(cap_mesh(&layout));
-    commands.insert_resource(CapMesh(cap.clone()));
+    let shared = SharedMeshes {
+        cap: meshes.add(hex_fan_mesh(&layout, 1.0 - INSET)),
+        water: meshes.add(hex_fan_mesh(&layout, 1.0)),
+    };
 
     let cap_material = materials.add(StandardMaterial {
         base_color: CAP_FILL,
@@ -122,29 +137,77 @@ pub fn spawn_grid(
         perceptual_roughness: 0.95,
         ..default()
     });
+    let water_material = materials.add(StandardMaterial {
+        base_color: WATER_FILL,
+        // Glossy, so the sun picks it out against the matte ground.
+        perceptual_roughness: 0.08,
+        reflectance: 0.7,
+        ..default()
+    });
 
+    let up = layout.plane.normal();
     for location in grid.iter() {
         let coord = location.coord;
-        commands.spawn((
-            HexCell { coord },
-            cell_transform(&layout, coord),
-            Visibility::default(),
-            children![
-                (
-                    Mesh3d(cap.clone()),
-                    MeshMaterial3d(cap_material.clone()),
-                    // The cap rides at the location's own height; the parent's scale turns that
-                    // dimensionless height into world units along with everything else.
-                    Transform::from_translation(layout.plane.normal() * location.data.height),
-                ),
-                (
-                    HexWall { coord },
-                    Mesh3d(meshes.add(wall_mesh(&layout, &grid, coord))),
-                    MeshMaterial3d(wall_material.clone()),
-                ),
-            ],
-        ));
+        let cell = commands
+            .spawn((
+                HexCell { coord },
+                cell_transform(&layout, coord),
+                Visibility::default(),
+                children![
+                    (
+                        Mesh3d(shared.cap.clone()),
+                        MeshMaterial3d(cap_material.clone()),
+                        // The cap rides at the location's own height; the parent's scale turns that
+                        // dimensionless height into world units along with everything else.
+                        Transform::from_translation(up * location.data.height),
+                    ),
+                    (
+                        HexWall { coord },
+                        Mesh3d(meshes.add(wall_mesh(&layout, &grid, coord))),
+                        MeshMaterial3d(wall_material.clone()),
+                    ),
+                ],
+            ))
+            .id();
+
+        for level in water_levels(&grid, coord) {
+            commands.spawn((
+                Mesh3d(shared.water.clone()),
+                MeshMaterial3d(water_material.clone()),
+                Transform::from_translation(up * (level + WATER_LIFT)),
+                ChildOf(cell),
+            ));
+        }
     }
+
+    commands.insert_resource(shared);
+}
+
+/// The water surfaces a location has to draw: its own, and any its neighbours have.
+///
+/// A plate covers the location's **whole** hexagon and is opaque, so the terrain occludes it
+/// wherever the ground is higher and the shoreline falls out of the depth buffer for free — no
+/// clipping and no shoreline geometry.
+///
+/// Carrying a neighbour's level is what closes the gap at the water's edge. A dry location's
+/// territory includes half of each bridge, at the mean of the two heights, so a location beside a
+/// flooded one dips below the water line near their shared edge even though its own cap stands
+/// clear. Its plate sits below its own ground and is therefore invisible except over exactly that
+/// strip. One ring is also all that is ever needed: if neither a location nor any neighbour is
+/// flooded then every height around it is above the water, so every bridge and wedge is too.
+fn water_levels(grid: &TerrainGrid, coord: Axial) -> Vec<f32> {
+    let mut levels = Vec::new();
+    // ponytail: one plate per distinct level, which is nearly always one. Two only where a location
+    // borders two separate bodies, and bodies at different levels must be divided by ground above
+    // them both, or the higher one would drain into the lower.
+    for around in std::iter::once(coord).chain(coord.neighbours()) {
+        if let Some(level) = grid.get(around).and_then(|l| l.data.water)
+            && !levels.contains(&level)
+        {
+            levels.push(level);
+        }
+    }
+    levels
 }
 
 /// Places a cell and stretches its unit-scale meshes to the layout. Heights ride inside the meshes,
@@ -162,7 +225,7 @@ fn cell_transform(layout: &HexLayout, coord: Axial) -> Transform {
 pub fn sync_cells(
     layout: Res<HexLayout>,
     grid: Res<GridModel>,
-    cap_mesh_handle: Option<Res<CapMesh>>,
+    shared: Option<Res<SharedMeshes>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut cells: Query<(&HexCell, &mut Transform)>,
     walls: Query<(&HexWall, &Mesh3d)>,
@@ -176,11 +239,13 @@ pub fn sync_cells(
         *transform = cell_transform(&layout, cell.coord);
     }
 
-    // Rewriting the shared asset updates every cap at once.
-    if let Some(handle) = cap_mesh_handle
-        && let Some(mut mesh) = meshes.get_mut(&handle.0)
-    {
-        *mesh = cap_mesh(&layout);
+    // Rewriting the shared assets updates every cap and every water surface at once.
+    if let Some(shared) = shared {
+        for (handle, radius) in [(&shared.cap, 1.0 - INSET), (&shared.water, 1.0)] {
+            if let Some(mut mesh) = meshes.get_mut(handle) {
+                *mesh = hex_fan_mesh(&layout, radius);
+            }
+        }
     }
 
     for (wall, handle) in &walls {
@@ -216,12 +281,13 @@ fn cap_corners(layout: &HexLayout, coord: Axial, height: f32) -> [Vec3; 6] {
     layout.corner_offsets().map(|o| centre + o * (1.0 - INSET))
 }
 
-/// The flat inset hexagon every location shares, as a fan of six triangles about its centre.
+/// A flat hexagon at the given fraction of the circumradius, as a fan of six triangles about its
+/// centre: a location's cap when inset, its water surface at full width.
 ///
 /// Built from [`HexLayout::corner_offsets`] at unit scale — the same function the outlines and the
-/// walls use — so none of the three can disagree.
-fn cap_mesh(layout: &HexLayout) -> Mesh {
-    let corners = layout.unit().corner_offsets().map(|o| o * (1.0 - INSET));
+/// walls use — so none of them can disagree.
+fn hex_fan_mesh(layout: &HexLayout, radius: f32) -> Mesh {
+    let corners = layout.unit().corner_offsets().map(|o| o * radius);
     let up = layout.plane.normal();
 
     let mut faces = Faces::with_capacity(6);
@@ -413,7 +479,7 @@ mod tests {
     fn every_face_is_wound_to_match_its_normal() {
         let grid = grid();
         for layout in layouts() {
-            let mut meshes = vec![cap_mesh(&layout)];
+            let mut meshes = vec![hex_fan_mesh(&layout, 1.0 - INSET)];
             meshes.extend(grid.coords().map(|c| wall_mesh(&layout, &grid, c)));
             for mesh in &meshes {
                 for ([v0, v1, v2], normal) in triangles(mesh) {
@@ -433,7 +499,7 @@ mod tests {
         let grid = grid();
         for layout in layouts() {
             let up = layout.plane.normal();
-            for (_, normal) in triangles(&cap_mesh(&layout)) {
+            for (_, normal) in triangles(&hex_fan_mesh(&layout, 1.0 - INSET)) {
                 assert!(normal.abs_diff_eq(up, EPS), "a cap should be level");
             }
             for coord in grid.coords() {
@@ -503,13 +569,13 @@ mod tests {
         let up = layout.plane.normal();
         let (left, right) = (Axial::ZERO, Axial::new(1, 0));
         let mut grid: TerrainGrid = Grid::new();
-        grid.insert(Location::new(left, Terrain { height: 0.0 }));
-        grid.insert(Location::new(right, Terrain { height: 0.0 }));
+        grid.insert(Location::new(left, Terrain { height: 0.0, water: None }));
+        grid.insert(Location::new(right, Terrain { height: 0.0, water: None }));
         // A tall cell on one of the corners the two share.
         for direction in 0..6 {
             let third = left.neighbour(direction);
             if third != right && third.distance(right) == 1 {
-                grid.insert(Location::new(third, Terrain { height: 2.0 }));
+                grid.insert(Location::new(third, Terrain { height: 2.0, water: None }));
             }
         }
 
@@ -545,13 +611,38 @@ mod tests {
         }
     }
 
+    /// A water surface has to reach one ring beyond the locations that are actually flooded, and
+    /// no further. A dry location beside a flooded one has half of their shared bridge under the
+    /// water line even though its own cap stands clear; without a plate there, the water's edge
+    /// would end in mid-air over submerged ground. Two rings are never needed, because a location
+    /// with no flooded neighbour has every surrounding height above the line, so every bridge and
+    /// wedge is above it too.
+    #[test]
+    fn water_reaches_exactly_one_ring_past_the_flooded_locations() {
+        let mut grid: TerrainGrid = Grid::new();
+        let lake = Axial::ZERO;
+        grid.insert(Location::new(lake, Terrain { height: -1.0, water: Some(0.0) }));
+        for coord in lake.neighbours() {
+            grid.insert(Location::new(coord, Terrain { height: 0.5, water: None }));
+        }
+        // One further out, sharing no corner with the lake.
+        let far = Axial::new(2, 0);
+        grid.insert(Location::new(far, Terrain { height: 0.5, water: None }));
+
+        assert_eq!(water_levels(&grid, lake), vec![0.0], "the lake itself");
+        for shore in lake.neighbours() {
+            assert_eq!(water_levels(&grid, shore), vec![0.0], "{shore:?} is a shoreline");
+        }
+        assert!(water_levels(&grid, far).is_empty(), "dry ground stays dry");
+    }
+
     #[test]
     fn a_lone_cell_is_a_flat_plate() {
         // With no neighbours every mean is over one location, so the fence is level with the cap
         // and the wall is a flat brim — the same code path that gives the grid's edge its lip.
         let layout = HexLayout::pointy(1.0);
         let mut grid: TerrainGrid = Grid::new();
-        grid.insert(Location::new(Axial::ZERO, Terrain { height: -0.4 }));
+        grid.insert(Location::new(Axial::ZERO, Terrain { height: -0.4, water: None }));
 
         let mesh = wall_mesh(&layout, &grid, Axial::ZERO);
         let brim = triangles(&mesh);
@@ -561,6 +652,6 @@ mod tests {
                 assert!((v.y - -0.4).abs() < EPS, "{v:?} should be level with the cap");
             }
         }
-        assert_eq!(triangles(&cap_mesh(&layout)).len(), 6);
+        assert_eq!(triangles(&hex_fan_mesh(&layout, 1.0 - INSET)).len(), 6);
     }
 }
