@@ -167,8 +167,8 @@ Details that are load-bearing:
   hidden with `Display::None` when the projection fails. One mechanism serves both the hex labels
   and the compass.
 - The material culls back faces. It was `double_sided` with no culling while the grid was a single
-  flat sheet, since showing that from underneath beat having it vanish; [[terrain]] made every cell
-  a solid prism, where each face has a meaningful side and the shadow pass wants the culling.
+  flat sheet, since showing that from underneath beat having it vanish; [[terrain]] gave every face
+  a meaningful side, and the shadow pass wants the culling.
 - **Both outline gizmo groups carry a negative `depth_bias`**, because the lines are exactly coplanar
   with the faces they trace. Omitting it is a bug that hides: at an oblique angle enough of each line
   wins the depth test to look right, but from directly overhead every interior edge has a face on both
@@ -247,6 +247,6 @@ Deliberate omissions:
 ## Related
 
 - [[hex-coordinates]]: the formulas as implemented, and the derivations behind them
-- [[terrain]]: the first payload on a location, and the prisms that draw it
+- [[terrain]]: the first payload on a location, and the surface that draws it
 - [[scene]]: the shell this is displayed in
 - [[bevy-0-19-api]]: the Bevy APIs the view depends on

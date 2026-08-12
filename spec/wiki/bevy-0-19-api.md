@@ -124,7 +124,8 @@ that `#[require(Camera)]`, i.e. per-view. Both are `{ color, brightness, affects
 along **Z** and is centred on the origin (`half_depth` either side), its cap comes from
 `EllipseMeshBuilder`, which starts at `FRAC_PI_2` and so is always pointy-top in XY, and it is
 closed at both ends. A Y-up prism therefore needs a rotation and an offset, a flat-top hexagon is
-out of reach, and an open-ended prism is not expressible at all.
+out of reach, and an open-ended prism is not expressible at all. Rejected for the hex terrain, whose
+caps and walls come from `corner_offsets` instead.
 
 For a hand-built mesh, **wind each face so that `(v1 - v0) × (v2 - v0)` is the normal it stores** —
 that cross product is what back-face culling compares against. `cull_mode: None` hides the mistake
@@ -134,8 +135,10 @@ catches it without a renderer.
 
 **Scaling a mesh to zero on one axis renders it black.** The normal transform is the inverse
 transpose of the model matrix, which a zero scale makes degenerate, so the shading normals come out
-unusable. Height fields hit this the moment a value lands exactly on the base plane. Floor the scale
-at a small positive value rather than special-casing the data.
+unusable. Anything that drives a scale component from data will eventually feed it a zero — a height
+field does so the moment a value lands exactly on its base plane. Keep data out of the scale where
+you can (a height is better expressed as a vertex position), and floor the scale at a small positive
+value where you cannot.
 
 ## UI widgets
 

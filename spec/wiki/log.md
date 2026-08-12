@@ -73,3 +73,30 @@ Append-only, newest at the bottom. Keep the prefix consistent so it stays greppa
   a lit `(91,100,123)` rather than `(20,23,33)`.
 - **Edited [[hex-grid]] with agreement** in three places it had gone wrong: the no-cull "flat sheet"
   material, selection being a ray against *the* grid plane, and terrain data being out of scope.
+
+## [2026-08-12] rework | terrain drawn as a stitched surface
+
+- Replaced the prisms with a surface stitched **between** locations: a level cap per location, inset
+  from its hexagon, and a ring of six quads joining it to its neighbours' caps. [[terrain]] rewritten
+  from Design discussion onward, with the superseded decisions kept as rejected options.
+- The reason: a sunken location's walls ran back up to the grid plane. That plane is notional, so
+  geometry reaching it was an artefact of the meshing. Nothing in the new build refers to it, and the
+  whole column/pit distinction went with it — the sign of a height is now just a vertex position.
+- Consequences of that: `Form`, the two shared prism meshes and `HexLayout::MIN_ELEVATION` all
+  deleted. `MIN_ELEVATION` existed because a zero *height* collapsed the elevation scale; with
+  heights as positions there is no longer a scale to collapse. The hazard itself is unchanged and
+  stays recorded in [[bevy-0-19-api]], re-aimed at the global scale.
+- **The fence rule** is what closes the surface: each cell's wall reaches the corners of its full
+  hexagon at the *mean of the heights present* at that point of the lattice. Averaging over present
+  cells rather than substituting for absent ones is the part that matters — it makes the boundary a
+  level lip with no special case, and it is why a lone location is a flat plate. Summed in coordinate
+  order, because floating-point addition is not associative and the three cells meeting at a point
+  would otherwise disagree by an ulp and crack the seam.
+- Ownership is **per location**, so each cell's mesh is exactly its own hexagon and hiding or adding
+  one is a clean hexagon's worth of surface. Cap and wall are separate meshes: the cap is identical
+  everywhere and shared, the wall depends on the neighbours. Both hang off a parent entity that
+  carries the transform and the visibility.
+- The corner↔direction relationship this is built on differs between the orientations by exactly one
+  index, so a mistake would show in flat-top only. Derived and recorded in [[hex-coordinates]], and
+  tested by re-deriving it from corner positions rather than by asserting a table.
+- The surface is a bare shell by choice: no skirt, no underside, so it is see-through from below.

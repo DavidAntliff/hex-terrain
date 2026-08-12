@@ -116,9 +116,6 @@ impl Default for HexLayout {
 }
 
 impl HexLayout {
-    /// The thinnest a location may be drawn, in world units. Small enough to read as flat.
-    pub const MIN_ELEVATION: f32 = 1e-3;
-
     /// A pointy-top layout on Bevy's ground plane, centred on the world origin.
     ///
     /// `scale` is the hexagon's circumradius — the centre-to-vertex distance — in world units.
@@ -170,18 +167,13 @@ impl HexLayout {
         }
     }
 
-    /// Scale to apply to a mesh built by [`Self::unit`] so it matches this layout at `height`.
+    /// Scale to apply to a mesh built by [`Self::unit`] so it matches this layout.
     ///
-    /// The elevation component is the *magnitude* of the height. A negative scale would mirror the
-    /// mesh and invert its facing, so a sunken location is a differently wound mesh rather than a
-    /// flipped one — see [`crate::view::grid_render`].
-    ///
-    /// It is also floored at [`Self::MIN_ELEVATION`]. A height of exactly zero is ordinary data —
-    /// any height field that crosses the plane produces one — but scaling a mesh to zero along an
-    /// axis makes its normal transform degenerate, and the cell renders black.
-    pub fn mesh_scale(&self, height: f32) -> Vec3 {
-        let elevation = (height.abs() * self.height_scale).max(Self::MIN_ELEVATION);
-        self.plane.mesh_scale(self.size, elevation)
+    /// Heights are dimensionless in a unit mesh, so the elevation axis carries the height scale.
+    /// Nothing here depends on a particular location's height: an individual height is a vertex
+    /// position, not a scale.
+    pub fn mesh_scale(&self) -> Vec3 {
+        self.plane.mesh_scale(self.size, self.height_scale)
     }
 
     /// World offset from the grid plane for a dimensionless height. Signed: positive rises along
@@ -237,6 +229,25 @@ impl HexLayout {
     pub fn corners(&self, coord: Axial) -> [Vec3; 6] {
         let centre = self.hex_to_world(coord);
         self.corner_offsets().map(|offset| centre + offset)
+    }
+
+    /// The two neighbour directions that share a given corner — the other two hexes meeting at
+    /// that point of the lattice, as indices into [`crate::hex::DIRECTIONS`].
+    ///
+    /// Corner `j` sits at angle `(start_angle + j)·60°` and the neighbour in direction `i` at
+    /// `(½ − start_angle − i)·60°`, since `DIRECTIONS` runs the opposite way round from the corners
+    /// in this frame. Equating a shared edge's midpoint, `(start_angle + j + ½)·60°`, to the
+    /// direction gives `j ≡ −2·start_angle − i (mod 6)`; corner `j` bounds the edges of directions
+    /// `i` and `i + 1`. Pointy-top and flat-top therefore differ by **exactly one index**, which is
+    /// the mistake this is written down to prevent. `corner_directions_are_geometric` re-derives it
+    /// from the actual corner positions rather than trusting the arithmetic.
+    pub fn corner_directions(&self, corner: usize) -> (usize, usize) {
+        let base = match self.orientation {
+            Orientation::Pointy => 5,
+            Orientation::Flat => 6,
+        };
+        let first = (base - corner % 6) % 6;
+        (first, (first + 1) % 6)
     }
 
     /// The six half-axes of the cube coordinate system, as unit world directions.
@@ -339,21 +350,36 @@ mod tests {
     }
 
     #[test]
-    fn mesh_scale_takes_the_height_magnitude_only() {
-        // A negative scale would mirror the mesh; sunken hexes get their own mesh instead.
+    fn mesh_scale_puts_the_height_scale_on_the_elevation_axis() {
         let layout = HexLayout::pointy(2.0).with_height_scale(3.0);
-        assert_eq!(layout.mesh_scale(-0.5), layout.mesh_scale(0.5));
-        assert_eq!(layout.mesh_scale(0.5), Vec3::new(2.0, 1.5, 2.0));
+        assert_eq!(layout.mesh_scale(), Vec3::new(2.0, 3.0, 2.0));
+        assert_eq!(
+            layout.with_plane(GridPlane::Xy).mesh_scale(),
+            Vec3::new(2.0, 2.0, 3.0)
+        );
     }
 
     #[test]
-    fn a_zero_height_still_has_thickness() {
-        // Scaling to zero along an axis makes the normal transform degenerate and the cell renders
-        // black, so a hex sitting exactly on the plane is floored rather than flattened.
-        let layout = HexLayout::pointy(1.0).with_height_scale(10.0);
-        assert_eq!(layout.mesh_scale(0.0).y, HexLayout::MIN_ELEVATION);
-        // The floor is not so large that it disturbs a real height.
-        assert_eq!(layout.mesh_scale(0.5).y, 5.0);
+    fn corner_directions_are_geometric() {
+        // The one index that differs between the orientations, so it is re-derived here from the
+        // corner positions rather than trusted: the two hexes named for a corner must both have a
+        // corner of their own at that same point.
+        for orientation in [Orientation::Pointy, Orientation::Flat] {
+            let layout = HexLayout::pointy(1.7).with_orientation(orientation);
+            let corners = layout.corners(Axial::ZERO);
+            for (corner, position) in corners.iter().enumerate() {
+                let (a, b) = layout.corner_directions(corner);
+                assert_ne!(a, b, "a corner is shared with two distinct neighbours");
+                for direction in [a, b] {
+                    let neighbour = layout.corners(Axial::ZERO.neighbour(direction));
+                    assert!(
+                        neighbour.iter().any(|c| c.abs_diff_eq(*position, EPS)),
+                        "corner {corner} is not a corner of the hex in direction {direction} \
+                         ({orientation:?})"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -33,8 +33,9 @@ Two directions of knowledge, deliberately kept apart:
 
 - [[hex-grid]]: the coordinate systems and grid model, plus the view that makes them visible —
   labels, axis compass, click selection, debug readout. `status: implemented`.
-- [[terrain]]: elevation as per-location data, drawn as hexagonal prisms — columns above the grid
-  plane, open pits below it — with surface-only picking and shadows. `status: implemented`.
+- [[terrain]]: elevation as per-location data, drawn as a continuous surface — a level cap per
+  location, joined to its neighbours by inclined walls — with picking and shadows.
+  `status: implemented`.
 - [[scene]]: the scene shell — starfield skybox, orbit camera, clean exit, native and web build
   paths. `status: implemented`.
 

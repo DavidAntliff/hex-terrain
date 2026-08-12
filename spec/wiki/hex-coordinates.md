@@ -108,6 +108,39 @@ eye.
 statements are true and they look contradictory on a diagram. Consequences: `-r` is north, `+q` is
 ENE, `+s` is WNW.
 
+## Which corners bound which neighbour (derived)
+
+Needed by anything that draws *between* hexes rather than inside one — the terrain surface joins
+each location to its neighbours across shared edges, and has to know which corners those are. The
+answer differs between the orientations **by exactly one index**, so a mistake shows up in one
+orientation only, which is the worst way for it to show up.
+
+Corner `j` sits at plane angle `(s + j)·60°`, where `s` is the start angle in sixths of a turn —
+½ for pointy-top, 0 for flat-top. The neighbour in direction `i` lies at `(½ − s − i)·60°`: the
+`DIRECTIONS` table runs the opposite way round from the corners in this frame, because
+`GridPlane::to_world` sends the reference's down-screen `+y` to the direction that reads as
+down-screen, which flips the handedness. Check it: pointy-top gives 0°, −60°, −120°, 180°, 120°, 60°
+— east, north-east, north-west, west, south-west, south-east, as the table says.
+
+The edge between corners `j` and `j+1` has its midpoint at `(s + j + ½)·60°`, and a shared edge's
+midpoint lies in the neighbour's direction. Equating the two:
+
+```
+j ≡ −2s − i   (mod 6)
+```
+
+So the edge shared with direction `i` is bounded by corners `a` and `a+1`, and corner `a` is shared
+with directions `i` and `i+1`:
+
+| direction `i` | 0 | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|---|
+| pointy-top corners | 5,0 | 4,5 | 3,4 | 2,3 | 1,2 | 0,1 |
+| flat-top corners | 0,1 | 5,0 | 4,5 | 3,4 | 2,3 | 1,2 |
+
+Implemented as `HexLayout::corner_directions`, and tested by re-deriving it from the corner
+positions — the two hexes named for a corner must each have a corner of their own at that same
+point — rather than by asserting the table.
+
 ## World mapping
 
 The reference is 2D with `+y` pointing down-screen ("south"). On Bevy's ground plane that becomes
@@ -152,4 +185,5 @@ empty space on the other.
 ## Related
 
 - [[hex-grid]]: the spec, including the model/projection split these formulas live in
+- [[terrain]]: builds its surface on the corner↔direction relationship above
 - [[bevy-0-19-api]]: the Bevy side — meshes, gizmos, UI projection
