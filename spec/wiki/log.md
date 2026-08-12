@@ -30,3 +30,21 @@ Append-only, newest at the bottom. Keep the prefix consistent so it stays greppa
   is the bridge.
 - Added a scripted-screenshot path (`HEX_TERRAIN_SCREENSHOT`), because capturing a window on an
   inactive workspace through X yields a blank image.
+
+## [2026-08-12] feature | orientation parameter, view controls, computed framing
+
+- Made the hexagon orientation a runtime parameter and **moved `Orientation` into the model**
+  ([[hex-grid]] → Design discussion). Doubled coordinates depend on it — doublewidth for pointy-top,
+  doubleheight for flat-top — and with the parameter confined to the projection layer the model
+  silently assumed pointy, which was a latent defect rather than a missing feature. Orientation is
+  dimensionless, so the model is the right home; its projection matrices stayed behind.
+- Debug panel now carries four controls: label mode (cycling through the three systems **and off**,
+  so one piece of state governs the labels), orientation toggle, compass checkbox, and reset view.
+- **Camera framing is now computed** from the projection's vertical field of view and aspect ratio
+  (`view/framing.rs`) rather than hand-tuned. Two constants had already been adjusted three times by
+  observation; a constant cannot be correct for all window shapes.
+- Fixed a bug the top-down view exposed: outline gizmos are coplanar with the faces they trace and
+  need a negative `depth_bias`. Without it, an oblique view looks correct while a vertical one loses
+  every interior edge. Recorded in [[bevy-0-19-api]] with the other gizmo, camera and widget facts.
+- `place` no longer uses `looking_at`, which has no valid up vector at the pole; the rotation is built
+  from yaw and pitch, so exactly vertical is now reachable.

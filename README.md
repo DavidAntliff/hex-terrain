@@ -1,8 +1,19 @@
 # hex-terrain
 
-A Bevy 0.19 sandbox: one cube at the origin, an all-sky starfield, orbit camera.
+A Bevy 0.19 sandbox: a hexagonal grid under an all-sky starfield, with an orbit camera. The grid is a
+hexagon of side 4 — 37 locations — addressable in axial, cube and doubled coordinates, following
+[Red Blob Games' hexagon guide](https://www.redblobgames.com/grids/hexagons/).
 
-- **Right-drag** to orbit, **scroll** to zoom.
+Design notes and accumulated knowledge live in `spec/` — start at `spec/home.md`.
+
+- **Right-drag** to orbit, **scroll** to zoom, **left-click** to select a hexagon, **Escape** to quit.
+- The panel top right reports the selected hexagon in axial, cube and doubled coordinates plus world
+  position, and carries four controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
+  pointy-top against flat-top, show or hide the axis compass, and reset the view to look straight down
+  with everything in frame.
+
+Set `HEX_TERRAIN_SCREENSHOT=<path>` to save a PNG of the scene and exit — useful for checking a change
+without a window manager in the way.
 
 ## Native
 

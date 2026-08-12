@@ -11,18 +11,13 @@
 use bevy::math::{Vec2, Vec3};
 use bevy::prelude::Resource;
 
-use crate::hex::{Axial, FractionalCube};
+use crate::hex::{Axial, FractionalCube, Orientation};
 
-/// Which way up the hexagons sit.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum Orientation {
-    /// A vertex at the top. Rows run east–west; the reference calls this "pointy".
-    #[default]
-    Pointy,
-    /// An edge at the top. Columns run north–south.
-    Flat,
-}
-
+/// The projection matrices for each orientation.
+///
+/// [`Orientation`] itself lives in the model, since it is dimensionless and also decides which
+/// doubled-coordinate variant applies. These matrices are pure projection, so they live here — the
+/// model never needs them.
 impl Orientation {
     /// Forward matrix `[f0, f1, f2, f3]`: hex coordinates to plane coordinates.
     const fn forward(self) -> [f32; 4] {
@@ -73,7 +68,9 @@ impl GridPlane {
         }
     }
 
-    fn from_world(self, world: Vec3) -> Vec2 {
+    /// World offset to in-plane coordinates: the inverse of [`Self::to_world`] for vectors lying
+    /// in the plane, discarding any component along the normal.
+    pub fn to_plane(self, world: Vec3) -> Vec2 {
         match self {
             Self::Xz => Vec2::new(world.x, world.z),
             Self::Xy => Vec2::new(world.x, -world.y),
@@ -133,6 +130,11 @@ impl HexLayout {
         self
     }
 
+    pub fn with_orientation(mut self, orientation: Orientation) -> Self {
+        self.orientation = orientation;
+        self
+    }
+
     pub fn with_origin(mut self, origin: Vec3) -> Self {
         self.origin = origin;
         self
@@ -176,7 +178,7 @@ impl HexLayout {
     /// plane first if they care about it. Call [`FractionalCube::round`] to get the containing hex.
     pub fn world_to_hex(&self, world: Vec3) -> FractionalCube {
         let [b0, b1, b2, b3] = self.orientation.inverse();
-        let plane = self.plane.from_world(world - self.origin);
+        let plane = self.plane.to_plane(world - self.origin);
         let p = Vec2::new(plane.x / self.size.x, plane.y / self.size.y);
         FractionalCube::new(b0 * p.x + b1 * p.y, b2 * p.x + b3 * p.y)
     }
@@ -342,10 +344,7 @@ mod tests {
     fn flat_layout_has_an_edge_where_pointy_has_a_vertex() {
         // The orientation's whole effect: flat-top puts a corner due east and an edge due north,
         // exactly swapping pointy-top's arrangement.
-        let flat = HexLayout {
-            orientation: Orientation::Flat,
-            ..HexLayout::pointy(1.0)
-        };
+        let flat = HexLayout::pointy(1.0).with_orientation(Orientation::Flat);
         let offsets = flat.corner_offsets();
         assert!(
             offsets.iter().any(|o| o.abs_diff_eq(Vec3::new(1.0, 0.0, 0.0), EPS)),
@@ -396,16 +395,19 @@ mod tests {
     }
 
     #[test]
-    fn axis_arrows_point_at_hexagon_vertices() {
-        // The self-checking property the compass relies on: for a pointy-top layout the cube axes
-        // line up with the hexagon's corners, so the drawn arrows should hit them.
-        let layout = HexLayout::pointy(1.0);
-        let corners = layout.corner_offsets();
-        for arrow in layout.axis_arrows() {
-            let hit = corners
-                .iter()
-                .any(|c| c.normalize().abs_diff_eq(arrow.direction, EPS));
-            assert!(hit, "{} does not point at a vertex", arrow.label);
+    fn axis_arrows_point_at_hexagon_vertices_in_both_orientations() {
+        // The self-checking property the compass relies on: the cube axes line up with the
+        // hexagon's corners, so the drawn arrows should hit them. True for either orientation,
+        // which is why the compass needs no special-casing when the orientation is toggled.
+        for orientation in [Orientation::Pointy, Orientation::Flat] {
+            let layout = HexLayout::pointy(1.0).with_orientation(orientation);
+            let corners = layout.corner_offsets();
+            for arrow in layout.axis_arrows() {
+                let hit = corners
+                    .iter()
+                    .any(|c| c.normalize().abs_diff_eq(arrow.direction, EPS));
+                assert!(hit, "{} does not point at a vertex ({orientation:?})", arrow.label);
+            }
         }
     }
 

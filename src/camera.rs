@@ -7,8 +7,11 @@ use bevy::{
 
 const LOOK_SENSITIVITY: f32 = 0.005;
 const ZOOM_SENSITIVITY: f32 = 0.1;
-const MIN_RADIUS: f32 = 3.0;
-const MAX_RADIUS: f32 = 200.0;
+pub const MIN_RADIUS: f32 = 3.0;
+pub const MAX_RADIUS: f32 = 200.0;
+
+/// Looking straight down. Reachable because [`place`] does not use `looking_at`.
+pub const TOP_DOWN_PITCH: f32 = std::f32::consts::FRAC_PI_2;
 
 /// Camera position in spherical coordinates about the origin.
 // ponytail: target is always the origin. Add a `target: Vec3` when panning is needed.
@@ -32,9 +35,13 @@ impl Default for Orbit {
 
 /// The transform an [`Orbit`] describes. Shared by setup and the orbit system so the first frame
 /// is already correct.
+///
+/// The rotation is built directly rather than through `looking_at`, which has no valid up vector
+/// when looking straight down — the view direction is then parallel to `+Y`. This form is well
+/// defined at the poles, so a pitch of exactly ±π/2 is allowed, and at that pitch north is up.
 pub fn place(o: &Orbit) -> Transform {
-    let dir = Quat::from_euler(EulerRot::YXZ, o.yaw, -o.pitch, 0.0) * Vec3::Z;
-    Transform::from_translation(dir * o.radius).looking_at(Vec3::ZERO, Vec3::Y)
+    let rotation = Quat::from_euler(EulerRot::YXZ, o.yaw, -o.pitch, 0.0);
+    Transform::from_translation(rotation * Vec3::Z * o.radius).with_rotation(rotation)
 }
 
 pub fn orbit(
@@ -47,8 +54,8 @@ pub fn orbit(
 
     if buttons.pressed(MouseButton::Right) {
         orbit.yaw -= motion.delta.x * LOOK_SENSITIVITY;
-        // Stop just short of the poles, where `looking_at` degenerates.
-        orbit.pitch = (orbit.pitch - motion.delta.y * LOOK_SENSITIVITY).clamp(-1.55, 1.55);
+        orbit.pitch = (orbit.pitch - motion.delta.y * LOOK_SENSITIVITY)
+            .clamp(-TOP_DOWN_PITCH, TOP_DOWN_PITCH);
     }
 
     // Browsers report pixel deltas roughly 50x larger than a desktop mouse's line deltas.

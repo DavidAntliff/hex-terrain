@@ -6,6 +6,7 @@
 
 pub mod compass;
 pub mod debug_ui;
+pub mod framing;
 pub mod grid_render;
 pub mod labels;
 pub mod layout;
@@ -39,7 +40,10 @@ impl Plugin for HexViewPlugin {
             .init_gizmo_group::<compass::CompassLines>()
             .init_resource::<selection::Selected>()
             .init_resource::<labels::LabelMode>()
+            .init_resource::<compass::ShowCompass>()
+            .init_resource::<framing::ResetViewRequested>()
             .add_observer(debug_ui::on_button_activate)
+            .add_observer(debug_ui::on_checkbox_changed)
             .add_systems(
                 Startup,
                 (
@@ -55,14 +59,20 @@ impl Plugin for HexViewPlugin {
                 Update,
                 (
                     selection::select_on_click,
-                    grid_render::sync_cell_transforms,
+                    framing::reset_view,
+                    // Everything that reacts to the layout changing — scale, or the orientation
+                    // toggle, which moves every hex and rotates the axes.
+                    grid_render::sync_cells,
                     labels::sync_label_anchors,
+                    labels::sync_label_visibility,
                     labels::update_label_text,
-                    debug_ui::update_button_caption,
+                    compass::sync_compass_labels,
+                    debug_ui::update_captions,
                     debug_ui::update_readout,
-                    // Runs after the anchors are up to date so labels never lag a frame behind.
+                    // After the anchors are up to date, so labels never lag a frame behind.
                     world_label::project_world_labels
-                        .after(labels::sync_label_anchors),
+                        .after(labels::sync_label_anchors)
+                        .after(compass::sync_compass_labels),
                     grid_render::draw_outlines,
                     compass::draw_compass,
                 ),

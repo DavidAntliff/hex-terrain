@@ -5,11 +5,17 @@
 //! - [`Axial`] — two components, the storage format. Hashable, so it keys the grid map.
 //! - [`Cube`] — three components constrained to `q + r + s == 0`. Most algorithms are simplest
 //!   here, because the third component makes the symmetry explicit.
-//! - [`Doubled`] — the *doublewidth* variant that suits pointy-top layouts.
+//! - [`Doubled`] — row/column addressing, in the variant the [`Orientation`] implies.
 //!
-//! Everything here is **dimensionless**: these are grid coordinates, with no notion of world
-//! units, scale, or orientation. Turning a coordinate into a position is the projection layer's
-//! job (`crate::view::layout`).
+//! Everything here is **dimensionless**: these are grid coordinates, with no notion of world units
+//! or scale. Turning a coordinate into a position is the projection layer's job
+//! (`crate::view::layout`).
+//!
+//! Axial and cube are orientation-independent — the grid's topology is the same however the
+//! hexagons are drawn. Doubled is the exception: "row" and "column" only mean something once an
+//! orientation is chosen, so its conversions take one.
+
+use super::Orientation;
 
 /// Axial coordinates: the storage format.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
@@ -28,7 +34,10 @@ pub struct Cube {
     pub s: i32,
 }
 
-/// Doubled-width coordinates, the pointy-top variant. `col + row` is always even.
+/// Doubled coordinates: row/column addressing where one axis steps by two.
+///
+/// Which axis doubles depends on the [`Orientation`] — *width* for pointy-top, *height* for
+/// flat-top — so every conversion takes one. `col + row` is always even in both variants.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Doubled {
     pub col: i32,
@@ -59,10 +68,19 @@ impl Axial {
         Cube::new(self.q, self.r)
     }
 
-    pub const fn to_doubled(self) -> Doubled {
-        Doubled {
-            col: 2 * self.q + self.r,
-            row: self.r,
+    /// Doubled coordinates in the variant `orientation` implies.
+    pub const fn to_doubled(self, orientation: Orientation) -> Doubled {
+        match orientation {
+            // Doublewidth: columns step by two, rows are the axial row.
+            Orientation::Pointy => Doubled {
+                col: 2 * self.q + self.r,
+                row: self.r,
+            },
+            // Doubleheight: rows step by two, columns are the axial column.
+            Orientation::Flat => Doubled {
+                col: self.q,
+                row: 2 * self.r + self.q,
+            },
         }
     }
 
@@ -108,8 +126,12 @@ impl Doubled {
         Self { col, row }
     }
 
-    pub const fn to_axial(self) -> Axial {
-        Axial::new((self.col - self.row) / 2, self.row)
+    /// Inverse of [`Axial::to_doubled`]; pass the same orientation.
+    pub const fn to_axial(self, orientation: Orientation) -> Axial {
+        match orientation {
+            Orientation::Pointy => Axial::new((self.col - self.row) / 2, self.row),
+            Orientation::Flat => Axial::new(self.col, (self.row - self.col) / 2),
+        }
     }
 }
 
@@ -176,12 +198,46 @@ mod tests {
     }
 
     #[test]
-    fn axial_doubled_round_trip() {
-        for a in sample() {
-            let d = a.to_doubled();
-            assert_eq!((d.col + d.row) % 2, 0, "{d:?} should have even col+row");
-            assert_eq!(d.to_axial(), a);
+    fn axial_doubled_round_trip_in_both_orientations() {
+        for orientation in [Orientation::Pointy, Orientation::Flat] {
+            for a in sample() {
+                let d = a.to_doubled(orientation);
+                assert_eq!(
+                    (d.col + d.row) % 2,
+                    0,
+                    "{d:?} should have even col+row ({orientation:?})"
+                );
+                assert_eq!(d.to_axial(orientation), a, "round trip failed ({orientation:?})");
+            }
         }
+    }
+
+    #[test]
+    fn each_orientation_doubles_its_own_axis() {
+        // The whole point of the parameter: pointy-top doubles the column, flat-top the row. Using
+        // the wrong variant produces numbers that match no visible row or column.
+        let coord = Axial::new(1, -1);
+        assert_eq!(coord.to_doubled(Orientation::Pointy), Doubled::new(1, -1));
+        assert_eq!(coord.to_doubled(Orientation::Flat), Doubled::new(1, -1));
+
+        // A coordinate where the two variants genuinely differ.
+        let coord = Axial::new(2, 1);
+        assert_eq!(coord.to_doubled(Orientation::Pointy), Doubled::new(5, 1));
+        assert_eq!(coord.to_doubled(Orientation::Flat), Doubled::new(2, 4));
+    }
+
+    #[test]
+    fn stepping_along_a_row_moves_the_doubled_axis_by_two() {
+        // The signature of doubled coordinates, and the clearest check that each orientation is
+        // paired with the right variant.
+        let east = Axial::ZERO.neighbour(0); // +q, along a pointy-top row
+        let pointy = east.to_doubled(Orientation::Pointy);
+        assert_eq!((pointy.col, pointy.row), (2, 0), "pointy row step should double the column");
+
+        // For flat-top, the column-wise neighbour is the one that steps the doubled row by two.
+        let south = Axial::new(0, 1);
+        let flat = south.to_doubled(Orientation::Flat);
+        assert_eq!((flat.col, flat.row), (0, 2), "flat column step should double the row");
     }
 
     #[test]

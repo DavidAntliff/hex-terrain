@@ -70,6 +70,47 @@ and `pan_camera`. **Neither orbits a fixed target**, so an orbit camera is still
 The crate's own docs suggest copying a controller and modifying it when the provided behaviour
 doesn't fit.
 
+## Gizmos
+
+Gizmo line width and depth bias are **per config group**, not per call, so a scene needing both thin
+and thick lines needs two groups: `#[derive(Default, Reflect, GizmoConfigGroup)]` plus
+`app.init_gizmo_group::<T>()`, then `Gizmos<T>` as a system parameter.
+
+**Coplanar gizmo lines z-fight with the mesh they trace.** Outlining a flat tile at the same height
+as its face needs a negative `depth_bias`, or the lines lose the depth test. The failure is
+direction-dependent and so easy to miss: at an oblique angle depth varies along each line and enough
+of it wins to look correct, but from directly overhead an interior edge has a face on both sides at
+identical depth and vanishes completely. What survives are the edges bordering empty space, so the
+result looks like a correct silhouette with no internal structure.
+
+## Cameras
+
+**`Transform::looking_at` has no valid up vector at the poles.** A camera directly above its target
+looking down has a view direction parallel to `+Y`, so `looking_at(target, Vec3::Y)` degenerates.
+Building the rotation from yaw and pitch instead — `Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0)`,
+with the position at `rotation * Vec3::Z * radius` — is well defined everywhere, allows a pitch of
+exactly ±π/2, and yields north-up at the pole. It is also no more code than the `looking_at` version.
+
+`Projection::Perspective(PerspectiveProjection { fov, aspect_ratio, .. })`: `fov` is the **vertical**
+field of view, and Bevy's `camera_system` keeps `aspect_ratio` in step with the window. Both are
+needed to frame content: the vertical extent depends on the field of view alone, the horizontal one
+also on the aspect ratio — which is why a widget placed beside the subject falls off-screen in a
+portrait window, and why a hand-tuned camera distance cannot be correct for all window shapes.
+
+## UI widgets
+
+`bevy_ui_widgets` ships **headless** widgets — behaviour and accessibility, no drawing:
+
+- `Button` emits `Activate { entity }`, observable with `On<Activate>`. Keyboard activation is
+  included, so a focused button responds to Enter and Space.
+- `Checkbox` emits `ValueChange<bool> { source, value, .. }` and reads its state from the `Checked`
+  component. It computes the next value from `Has<Checked>`, so **`Checked` must be maintained** or
+  every click reports `true`. Add the provided `checkbox_self_update` observer to the entity for
+  that, and set the initial `Checked` yourself. Rendering the box is the caller's job.
+
+Both use `bevy_picking` under the hood, which is what makes a UI click also reachable by
+world-space picking code — see `Hovered` below.
+
 ## Other
 
 - **`Assets::get_mut` returns a guard**, not a plain `&mut`, so it needs `let mut image = …`.

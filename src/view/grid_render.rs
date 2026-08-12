@@ -38,12 +38,28 @@ pub struct HexCell {
     pub coord: Axial,
 }
 
+/// The one hexagon mesh every cell shares.
+///
+/// Held so an orientation change can rewrite it in place: corner angles differ between pointy and
+/// flat, which a `Transform` cannot express. Scale changes still need no rebuild.
+#[derive(Resource)]
+pub struct HexMesh(pub Handle<Mesh>);
+
+/// Both outline groups need a negative depth bias, because the lines are exactly coplanar with the
+/// faces they trace and would otherwise z-fight with them.
+///
+/// This is easy to miss: at an oblique angle depth varies along each line and enough of it wins to
+/// look correct, but from directly overhead an interior edge has a face on both sides at identical
+/// depth and disappears entirely. Only edges bordering empty space survive, so the grid renders as a
+/// silhouette with no internal structure.
 pub fn configure_gizmo_widths(mut store: ResMut<GizmoConfigStore>) {
-    store.config_mut::<GridLines>().0.line.width = EDGE_WIDTH;
+    let (grid_lines, _) = store.config_mut::<GridLines>();
+    grid_lines.line.width = EDGE_WIDTH;
+    grid_lines.depth_bias = -0.1;
+
     let (highlight, _) = store.config_mut::<Highlight>();
     highlight.line.width = ACTIVE_EDGE_WIDTH;
-    // Draw the highlight on top of the faces so a selected hex reads clearly.
-    highlight.depth_bias = -0.1;
+    highlight.depth_bias = -0.2;
 }
 
 /// Spawns a face per location, all sharing one unit-sized mesh and material.
@@ -55,6 +71,7 @@ pub fn spawn_grid(
     layout: Res<HexLayout>,
 ) {
     let mesh = meshes.add(unit_hex_mesh(&layout));
+    commands.insert_resource(HexMesh(mesh.clone()));
     let material = materials.add(StandardMaterial {
         base_color: FILL,
         perceptual_roughness: 0.9,
@@ -78,16 +95,27 @@ fn cell_transform(layout: &HexLayout, coord: Axial) -> Transform {
     Transform::from_translation(layout.hex_to_world(coord)).with_scale(layout.mesh_scale())
 }
 
-/// Keeps the faces in step when the layout — most likely its scale — changes.
-pub fn sync_cell_transforms(
+/// Keeps the faces in step when the layout changes — its scale, or its orientation.
+pub fn sync_cells(
     layout: Res<HexLayout>,
+    hex_mesh: Option<Res<HexMesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut cells: Query<(&HexCell, &mut Transform)>,
 ) {
     if !layout.is_changed() {
         return;
     }
+
+    // Positions move with orientation as well as scale, so both are recomputed here.
     for (cell, mut transform) in &mut cells {
         *transform = cell_transform(&layout, cell.coord);
+    }
+
+    // Rewriting the shared asset updates all 37 cells at once.
+    if let Some(hex_mesh) = hex_mesh
+        && let Some(mut mesh) = meshes.get_mut(&hex_mesh.0)
+    {
+        *mesh = unit_hex_mesh(&layout);
     }
 }
 

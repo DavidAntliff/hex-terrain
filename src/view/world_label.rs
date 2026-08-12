@@ -10,15 +10,21 @@ use bevy::prelude::*;
 #[derive(Component)]
 pub struct WorldLabel {
     pub anchor: Vec3,
+    /// Whether the owner wants this label shown at all. Distinct from being off-screen, which
+    /// [`project_world_labels`] decides for itself — this is the on/off switch the UI drives.
+    pub visible: bool,
 }
 
 impl WorldLabel {
     pub fn new(anchor: Vec3) -> Self {
-        Self { anchor }
+        Self {
+            anchor,
+            visible: true,
+        }
     }
 }
 
-/// Bundle-ish helper: the components every world label needs.
+/// The components every world label needs.
 pub fn world_label(anchor: Vec3, text: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     (
         WorldLabel::new(anchor),
@@ -39,6 +45,10 @@ pub fn project_world_labels(
     let (camera, camera_transform) = *camera;
 
     for (label, mut node) in &mut labels {
+        if !label.visible {
+            node.display = Display::None;
+            continue;
+        }
         match camera.world_to_viewport(camera_transform, label.anchor) {
             Ok(screen) => {
                 node.display = Display::Block;

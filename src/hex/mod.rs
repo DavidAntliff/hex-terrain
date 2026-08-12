@@ -9,9 +9,11 @@
 
 pub mod coords;
 pub mod grid;
+pub mod orientation;
 
 pub use coords::{Axial, Cube, Doubled, FractionalCube, DIRECTIONS};
 pub use grid::{Grid, Location};
+pub use orientation::Orientation;
 
 /// Per-location payload.
 ///

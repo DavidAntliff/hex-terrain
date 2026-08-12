@@ -16,24 +16,48 @@ derived instead, and those derivations are recorded here with the tests that con
 |---|---|---|
 | axial | `q, r` | storage; hashable, so it keys the grid map |
 | cube | `q, r, s` with `q + r + s == 0` | algorithms — the third component makes the symmetry explicit |
-| doubled | `col, row` with `col + row` even | an alternative addressing scheme, no arithmetic advantage here |
+| doubled | `col, row` with `col + row` even | row/column addressing; the variant depends on the orientation |
 
 Conversions, all exact integer arithmetic:
 
 ```
 axial → cube      q, r, s = q, r, -q-r
 cube  → axial     q, r
-axial → doubled   col = 2q + r,  row = r          (doublewidth, the pointy-top variant)
-doubled → axial   q = (col - row) / 2,  r = row
+
+pointy-top — doublewidth: the column doubles
+axial → doubled   col = 2q + r,          row = r
+doubled → axial   q = (col - row) / 2,   r = row
+
+flat-top — doubleheight: the row doubles
+axial → doubled   col = q,               row = 2r + q
+doubled → axial   q = col,               r = (row - col) / 2
 ```
 
 `Cube::new` takes only `q, r` and derives `s`, so the invariant cannot be broken by construction
 rather than being checked afterwards.
 
-**Doublewidth goes with pointy-top, doubleheight with flat-top.** Only doublewidth is implemented;
-the other would be dead code. Watch out when reading the reference: the *offset* section's
-conversions contain `col & 1` terms, and it is easy to lift those by mistake — the doubled
-conversions have no bit-twiddling at all.
+## Doubled is orientation-dependent, and that decides where it lives
+
+Axial and cube are orientation-independent: the grid's topology — neighbours, distance, everything —
+is identical however the hexagons are drawn, since pointy versus flat is a 30° rotation of the
+rendering. Doubled is the exception, because "row" and "column" only mean something once an
+orientation is chosen. **Doublewidth pairs with pointy-top, doubleheight with flat-top**; using the
+wrong variant yields numbers matching no visible row or column.
+
+That forces a structural choice, since orientation is otherwise a rendering concern. `Orientation`
+therefore lives in the **model** (`hex/orientation.rs`) — it is dimensionless, carrying no world
+units — while its projection matrices live with the projection. Every doubled conversion takes an
+orientation, so the two cannot disagree. Offset coordinates would need exactly the same treatment
+(evenr/oddr for pointy, evenq/oddq for flat) if they are ever added.
+
+The signature to check by eye: along a row of pointy-top hexes `col` steps by **2** while `row` holds;
+down a column of flat-top hexes `row` steps by **2** while `col` holds. The invariant `col + row`
+being even follows in both variants, since both sum to `2q + 2r`.
+
+Watch out when reading the reference: the *offset* section's conversions contain `col & 1` terms, and
+it is easy to lift those by mistake — the doubled conversions have no bit-twiddling at all. Its names
+also invite an off-by-one-concept error: `rdoubled` is doublewidth (row preserved) and `qdoubled` is
+doubleheight (column preserved).
 
 ## Layout matrices
 
@@ -107,6 +131,23 @@ arithmetic and neighbour tables that vary by row parity.
 
 The hexagon shape itself comes from bounding all three cube components: `q` over `-radius..=radius`
 and `r` clamped so `|s| <= radius` too. Without the `s` bound the same loop yields a rhombus.
+
+## Framing a grid on screen
+
+Fitting the whole grid in view is a projection question, not a grid one, and it needs the camera's
+real numbers rather than a tuned constant. Looking straight down from distance `d` with vertical field
+of view `fov` and aspect ratio `a`, the visible half-extents are `d·tan(fov/2)` vertically and
+`d·tan(fov/2)·a` horizontally, so the distance needed for a half-extent `(x, y)` is:
+
+```
+d = max( y / tan(fov/2),  x / (tan(fov/2)·a) )
+```
+
+Measure the extent from hex **corners**, not centres — the outermost hex's far edge is what has to
+fit. Two consequences worth remembering: the horizontal term is the one that depends on window shape,
+so a widget placed beside the grid disappears in a portrait window; and because the camera here always
+looks at the origin, the extent must be taken symmetrically about it, so content off to one side costs
+empty space on the other.
 
 ## Related
 

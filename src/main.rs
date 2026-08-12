@@ -110,7 +110,7 @@ fn patch_cubemap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hex_terrain::hex::{Axial, Cube, Doubled};
+    use hex_terrain::hex::{Axial, Cube, Doubled, Orientation};
 
     // Escape cannot be sent by hand in a headless check, so verify the wiring instead: the
     // right key code, the system registered, and an actual AppExit reaching the app.
@@ -138,13 +138,16 @@ mod tests {
         assert!(grid.contains(Axial::ZERO));
     }
 
-    /// The centre hex is the origin of every coordinate system, including world space.
+    /// The centre hex is the origin of every coordinate system, including world space, in either
+    /// orientation.
     #[test]
     fn centre_hex_is_the_origin_of_all_systems() {
-        let layout = HexLayout::pointy(HEX_SCALE);
         let centre = Axial::ZERO;
         assert_eq!(centre.to_cube(), Cube::ZERO);
-        assert_eq!(centre.to_doubled(), Doubled::new(0, 0));
-        assert_eq!(layout.hex_to_world(centre), Vec3::ZERO);
+        for orientation in [Orientation::Pointy, Orientation::Flat] {
+            let layout = HexLayout::pointy(HEX_SCALE).with_orientation(orientation);
+            assert_eq!(centre.to_doubled(orientation), Doubled::new(0, 0));
+            assert_eq!(layout.hex_to_world(centre), Vec3::ZERO);
+        }
     }
 }
