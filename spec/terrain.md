@@ -114,11 +114,17 @@ carry different materials, and later a colour blend across the wall between two 
 per-cell combined mesh could not express as cheaply.
 
 **Selection stays arithmetic**, as [[hex-grid]] locks in — it intersects a plane at each location's
-own cap height and keeps a hit only where it lands inside that location's **full** hexagon. Testing
-the full hexagon rather than the inset cap is deliberate: a location's territory is its hexagon, so
-a click on the wall belongs to the cell it is nearer. The imprecision is that over the wall the
-tested plane sits at the cap's height rather than on the incline — a few pixels, and only at
-grazing angles.
+surface and keeps a hit only where it lands inside that location's **full** hexagon. Testing the
+full hexagon rather than the inset cap is deliberate: a location's territory is its hexagon, so a
+click on the wall belongs to the cell it is nearer. The imprecision is that over the wall the tested
+plane sits at the cap's height rather than on the incline — a few pixels, and only at grazing angles.
+
+**A location presents one surface, and everything that addresses it uses that.** `Terrain::surface`
+is the water where there is any and the ground where there is not, and picking, outlines and labels
+all go through it: a click on a lake lands on the water, the outline is drawn on the water, and the
+label floats on it. The alternative — addressing the ground under the water — is not merely
+unintuitive, it does not render: an outline on the sea bed is either swallowed by the water or shows
+through it depending on how deep the water happens to be, so the grid looks arbitrary. Locked.
 
 **Water is a per-location level, and the depth buffer cuts the shoreline.** A location carries the
 surface level of the water covering it, or nothing — per location rather than global, so a mountain
@@ -169,7 +175,11 @@ src/main.rs              HEIGHT_SCALE, the grid's generator, shadows and ambient
 Details that are load-bearing:
 
 - **`surface_centre` is the single answer to "where is this location's terrain".** Labels, outlines
-  and picking all call it, so they cannot disagree.
+  and picking all call it, with `Terrain::surface` deciding the level, so they cannot disagree.
+- **An outline floats just clear of what it traces**, by more than the water's own lift. That covers
+  the awkward case of a location standing *exactly* at the water line: the model calls it dry, since
+  flooding is strict, but the renderer still covers it with a neighbour's surface, so an outline at
+  the cap would be under water.
 - **A cell is a parent entity with a cap child and a wall child.** The parent carries the transform
   and the visibility both inherit, which is what makes hiding or restyling one location a
   single-component change.
@@ -236,9 +246,11 @@ Details that are load-bearing:
   height on one of the corners they share. This is the regression test for the artefact above: it
   fails against the lattice-vertex rule and passes against the pairwise one.
 - Water: `flood` covers exactly what lies below the level and drains the rest, at a level that can
-  rise and fall again; and a surface appears on a flooded location and on each of its neighbours —
-  but not one ring further out, which is the check that the shoreline is covered without water
-  spreading over dry ground.
+  rise and fall again; `Terrain::surface` is the water where there is any and the ground where there
+  is not, including when nonsense data puts water below the ground; and a surface appears on a
+  flooded location and on each of its neighbours — but not one ring further out, which is the check
+  that the shoreline is covered without water spreading over dry ground.
+- Selection: a submerged location is picked at its waterline, not at the sea bed.
 - Selection: looking straight down picks the hex below at two height scales, at the centre and 80%
   of the way to a corner; a shallow ray crossing a low cell's airspace and a tall one's east wall
   picks the tall one; a ray passing just over it and away picks nothing.

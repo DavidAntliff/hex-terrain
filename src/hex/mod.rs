@@ -32,6 +32,18 @@ pub struct Terrain {
 /// The grid the scene displays: a hexagon of side 4 (radius 3, 37 locations).
 pub type TerrainGrid = Grid<Terrain>;
 
+impl Terrain {
+    /// The level of whatever forms this location's visible surface: the water covering it, or the
+    /// ground where nothing does.
+    ///
+    /// What a location *presents* — what a click lands on, what an outline traces, what a label
+    /// sits above — as against `height`, which is only ever the ground. Guards against water below
+    /// the ground it is meant to cover, which [`flood`] never produces but nothing else forbids.
+    pub fn surface(&self) -> f32 {
+        self.water.map_or(self.height, |level| level.max(self.height))
+    }
+}
+
 /// The level the terrain starts flooded to, in the same units as a height.
 pub const SEA_LEVEL: f32 = 0.0;
 
@@ -89,6 +101,15 @@ mod tests {
         }
         assert!(grid.iter().any(|l| l.data.water.is_some()), "nothing is flooded");
         assert!(grid.iter().any(|l| l.data.water.is_none()), "everything is flooded");
+    }
+
+    #[test]
+    fn a_surface_is_the_water_where_there_is_any_and_the_ground_otherwise() {
+        assert_eq!(Terrain { height: 0.3, water: None }.surface(), 0.3);
+        assert_eq!(Terrain { height: -0.4, water: Some(0.2) }.surface(), 0.2);
+        // Water below the ground it claims to cover is not something `flood` makes, but the ground
+        // still wins if it ever appears.
+        assert_eq!(Terrain { height: 0.5, water: Some(-0.5) }.surface(), 0.5);
     }
 
     #[test]

@@ -143,3 +143,15 @@ Append-only, newest at the bottom. Keep the prefix consistent so it stays greppa
   locations are wet at all, not merely how high the water sits.
 - Verified by starting at a raised level rather than by dragging: at `+0.45` only the highest
   locations stay clear and the shoreline is still seamless.
+
+## [2026-08-12] fix | a location presents one surface
+
+- Outlines on submerged locations looked arbitrary: drawn on the sea bed, each was either swallowed
+  by the water or showing through it depending on how deep that particular location was, since the
+  gizmo depth bias beats a small depth difference and loses to a large one.
+- `Terrain::surface` — the water where there is any, the ground where there is not — is now what
+  picking, outlines and labels all address. A click on a lake lands on the water, the outline is
+  drawn on it, and the label floats on it.
+- Outlines float just clear of what they trace, by more than the water's own lift, which also covers
+  a location standing exactly at the water line: flooding is strict so the model calls it dry, but a
+  neighbour's surface still covers it.

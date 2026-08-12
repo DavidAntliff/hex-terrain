@@ -83,7 +83,7 @@ pub fn spawn_labels(
         commands.spawn((
             HexLabel { coord },
             world_label(
-                layout.surface_centre(coord, location.data.height),
+                layout.surface_centre(coord, location.data.surface()),
                 mode.format(coord, layout.orientation),
                 LABEL_SIZE,
                 LABEL_COLOR,
@@ -119,22 +119,21 @@ pub fn sync_label_visibility(
     }
 }
 
-/// Re-anchors the labels when the layout changes, so they track a rescaled or reoriented grid.
-///
-/// Heights are static, so the layout is the only thing that can move a label.
+/// Re-anchors the labels so they track a rescaled or reoriented grid, and follow a location's
+/// surface up onto the water when it floods.
 pub fn sync_label_anchors(
     layout: Res<HexLayout>,
     grid: Res<GridModel>,
     mut labels: Query<(&HexLabel, &mut WorldLabel)>,
 ) {
-    if !layout.is_changed() {
+    if !layout.is_changed() && !grid.is_changed() {
         return;
     }
     for (label, mut anchor) in &mut labels {
         let Some(location) = grid.get(label.coord) else {
             continue;
         };
-        anchor.anchor = layout.surface_centre(label.coord, location.data.height);
+        anchor.anchor = layout.surface_centre(label.coord, location.data.surface());
     }
 }
 

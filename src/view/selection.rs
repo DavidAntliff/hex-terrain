@@ -52,18 +52,18 @@ pub fn select_on_click(
 
 /// The hex whose surface the ray meets first, if any.
 ///
-/// Each location contributes one horizontal face at its own elevation. A hit counts only if it
-/// falls inside that location's own footprint, which is what makes walls transparent to selection
-/// and pits selectable through their opening.
+/// Each location contributes one horizontal face at whatever it presents — its cap, or the water
+/// standing over it, which is what a click on a lake lands on. A hit counts only if it falls inside
+/// that location's own footprint, which is what makes walls transparent to selection.
 ///
 // ponytail: a linear scan over every location, and walls do not occlude — only surfaces are
-// tested, so at a grazing angle a pit floor hidden behind a taller neighbour can still be picked.
+// tested, so at a grazing angle a low cap hidden behind a taller neighbour can still be picked.
 // Test the six wall quads per hex if that ever shows.
 fn pick_surface(ray: Ray3d, layout: &HexLayout, grid: &TerrainGrid) -> Option<Axial> {
     let plane = InfinitePlane3d::new(layout.plane.normal());
     grid.iter()
         .filter_map(|location| {
-            let surface = layout.surface_centre(location.coord, location.data.height);
+            let surface = layout.surface_centre(location.coord, location.data.surface());
             let distance = ray.intersect_plane(surface, plane)?;
             let point = ray.get_point(distance);
             let hit = layout.world_to_hex(point).round().to_axial();
@@ -89,10 +89,10 @@ mod tests {
             let grid = Grid::hexagon(3, undulating);
             for location in grid.iter() {
                 let coord = location.coord;
-                let surface = layout.surface_centre(coord, location.data.height);
+                let surface = layout.surface_centre(coord, location.data.surface());
                 assert_eq!(pick_surface(down_at(surface), &layout, &grid), Some(coord));
                 // Off-centre, but still inside the hex.
-                let corner = layout.corners(coord)[0] + layout.elevation(location.data.height);
+                let corner = layout.corners(coord)[0] + layout.elevation(location.data.surface());
                 let probe = surface + (corner - surface) * 0.8;
                 assert_eq!(pick_surface(down_at(probe), &layout, &grid), Some(coord));
             }
@@ -128,5 +128,29 @@ mod tests {
         // Aimed just over the column and away: nothing, rather than the hex underneath.
         let past = aimed(east, top + Vec3::new(-20.0, 4.1, 0.0));
         assert_eq!(pick_surface(past, &layout, &grid), None);
+    }
+
+    /// A flooded location is caught at the water rather than at the sea bed, so clicking a lake
+    /// selects it where it looks like it should.
+    #[test]
+    fn a_submerged_location_is_picked_at_the_waterline() {
+        let layout = HexLayout::pointy(1.0);
+        let sunk = Axial::ZERO;
+        let mut grid: TerrainGrid = Grid::new();
+        grid.insert(Location::new(sunk, Terrain { height: -1.0, water: Some(0.25) }));
+
+        let waterline = layout.surface_centre(sunk, 0.25);
+        assert_eq!(pick_surface(down_at(waterline), &layout, &grid), Some(sunk));
+
+        // A ray that stops above the sea bed but below the water still finds it, because the water
+        // is what it meets — the old behaviour would have needed it to reach all the way down.
+        let just_under = waterline + Vec3::Y * 0.1;
+        let shallow = Ray3d::new(just_under + Vec3::new(8.0, 0.4, 0.0), Dir3::NEG_X);
+        assert_eq!(pick_surface(shallow, &layout, &grid), None, "above the surface");
+        let onto = Ray3d::new(
+            waterline + Vec3::new(8.0, 4.0, 0.0),
+            Dir3::new(waterline - (waterline + Vec3::new(8.0, 4.0, 0.0))).unwrap(),
+        );
+        assert_eq!(pick_surface(onto, &layout, &grid), Some(sunk));
     }
 }

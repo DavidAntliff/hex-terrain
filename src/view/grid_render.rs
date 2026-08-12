@@ -36,7 +36,7 @@ use bevy::{
 use super::layout::HexLayout;
 use super::selection::Selected;
 use super::GridModel;
-use crate::hex::{Axial, TerrainGrid};
+use crate::hex::{Axial, Terrain, TerrainGrid};
 
 /// Thin outlines for every hex.
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -320,7 +320,7 @@ pub fn draw_outlines(
     selected: Res<Selected>,
 ) {
     for location in grid.iter() {
-        let corners = cap_corners(&layout, location.coord, location.data.height);
+        let corners = outline_corners(&layout, location.coord, location.data);
         // `linestrip` does not close the loop, so repeat the first corner.
         let loop_ = corners.into_iter().chain(std::iter::once(corners[0]));
         if selected.0 == Some(location.coord) {
@@ -331,10 +331,19 @@ pub fn draw_outlines(
     }
 }
 
-/// World positions of a cap's six corners — the inset hexagon the wall hangs from, and the outline
-/// the gizmos trace.
-fn cap_corners(layout: &HexLayout, coord: Axial, height: f32) -> [Vec3; 6] {
-    let centre = layout.surface_centre(coord, height);
+/// World positions of the six corners an outline traces: the inset hexagon, floating just clear of
+/// whatever the location presents — its cap, or the water over it.
+///
+/// A submerged location is traced on the water rather than on the sea bed, which is the only way
+/// the line reads at all: drawn on the bed it is either swallowed by the water or, where the
+/// gizmo's depth bias happens to beat the shallow depth difference, showing through it — and which
+/// of those you get depends on how deep the water is, so the grid looks arbitrary.
+///
+/// The clearance is more than [`WATER_LIFT`] so that a line is above every surface it could be
+/// competing with, including the plate over a location standing *exactly* at its own water line,
+/// which the model calls dry but the renderer still covers.
+fn outline_corners(layout: &HexLayout, coord: Axial, terrain: Terrain) -> [Vec3; 6] {
+    let centre = layout.surface_centre(coord, terrain.surface() + 2.0 * WATER_LIFT);
     layout.corner_offsets().map(|o| centre + o * (1.0 - INSET))
 }
 
