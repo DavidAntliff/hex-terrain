@@ -168,6 +168,12 @@ value where you cannot.
   every click reports `true`. Add the provided `checkbox_self_update` observer to the entity for
   that, and set the initial `Checked` yourself. Rendering the box is the caller's job.
 
+- `Slider` reports `ValueChange<f32>` and keeps `SliderValue` up to date through the provided
+  `slider_self_update` observer, exactly like `Checkbox`. It requires `SliderValue`, `SliderRange`
+  and `SliderStep`, and expects a descendant marked `SliderThumb` — but it **never moves the
+  thumb**: positioning it is the caller's, and `SliderRange::thumb_position(value)` gives the 0..1
+  fraction to do it with. Reduce the travel by the thumb's own width or it overhangs the ends.
+
 Both use `bevy_picking` under the hood, which is what makes a UI click also reachable by
 world-space picking code — see `Hovered` below.
 

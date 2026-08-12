@@ -32,21 +32,30 @@ pub struct Terrain {
 /// The grid the scene displays: a hexagon of side 4 (radius 3, 37 locations).
 pub type TerrainGrid = Grid<Terrain>;
 
-/// The level the placeholder terrain floods to, in the same units as a height.
+/// The level the terrain starts flooded to, in the same units as a height.
 pub const SEA_LEVEL: f32 = 0.0;
 
-/// Placeholder terrain: one sinusoid along each axis, giving a wave that crosses the grid plane,
-/// with everything below [`SEA_LEVEL`] under water.
+/// Placeholder terrain: one sinusoid along each axis, giving a wave that crosses the grid plane.
 ///
 /// Centred on zero rather than lifted clear of it, so the grid has troughs as well as peaks. The
-/// frequency puts about one full period across a radius-3 grid.
+/// frequency puts about one full period across a radius-3 grid. Dry — [`flood`] decides the water.
 pub fn undulating(coord: Axial) -> Terrain {
     const FREQUENCY: f32 = 0.9; // radians per hex step
     let (q, r) = (coord.q as f32, coord.r as f32);
-    let height = 0.5 * ((q * FREQUENCY).sin() + (r * FREQUENCY).sin());
     Terrain {
-        height,
-        water: (height < SEA_LEVEL).then_some(SEA_LEVEL),
+        height: 0.5 * ((q * FREQUENCY).sin() + (r * FREQUENCY).sin()),
+        water: None,
+    }
+}
+
+/// Fills every location that lies below `level` with water at that level, and drains the rest.
+///
+/// One body at one level over the whole grid, which is what a single sea level means. A location's
+/// water is per-location so that separate bodies can sit at their own levels — a mountain lake
+/// above the sea it drains into — but nothing generates those yet.
+pub fn flood(grid: &mut TerrainGrid, level: f32) {
+    for location in grid.iter_mut() {
+        location.data.water = (location.data.height < level).then_some(level);
     }
 }
 
@@ -65,17 +74,29 @@ mod tests {
     }
 
     #[test]
-    fn water_covers_exactly_what_lies_below_sea_level() {
-        let grid = Grid::hexagon(3, undulating);
+    fn flooding_covers_exactly_what_lies_below_the_level() {
+        let mut grid = Grid::hexagon(3, undulating);
+        assert!(grid.iter().all(|l| l.data.water.is_none()), "starts dry");
+
+        flood(&mut grid, SEA_LEVEL);
         for location in grid.iter() {
             assert_eq!(
-                location.data.water.is_some(),
-                location.data.height < SEA_LEVEL,
+                location.data.water,
+                (location.data.height < SEA_LEVEL).then_some(SEA_LEVEL),
                 "{:?} is wet without being low, or low without being wet",
                 location.coord
             );
         }
         assert!(grid.iter().any(|l| l.data.water.is_some()), "nothing is flooded");
         assert!(grid.iter().any(|l| l.data.water.is_none()), "everything is flooded");
+    }
+
+    #[test]
+    fn the_level_can_rise_and_fall_again() {
+        let mut grid = Grid::hexagon(3, undulating);
+        flood(&mut grid, 2.0);
+        assert!(grid.iter().all(|l| l.data.water == Some(2.0)), "all under");
+        flood(&mut grid, -2.0);
+        assert!(grid.iter().all(|l| l.data.water.is_none()), "all drained");
     }
 }

@@ -88,14 +88,45 @@ pub struct HexWall {
     coord: Axial,
 }
 
-/// The two hexagon fans every location shares: its cap, inset, and its water surface, full width.
+/// The assets every location shares: the two hexagon fans — its cap, inset, and its water surface,
+/// full width — and the material the water is drawn with.
 ///
-/// Held so an orientation change can rewrite them in place: corner angles differ between pointy and
-/// flat, which a `Transform` cannot express. Scale and height-scale changes need no rebuild.
+/// The meshes are held so an orientation change can rewrite them in place: corner angles differ
+/// between pointy and flat, which a `Transform` cannot express. Scale and height-scale changes need
+/// no rebuild. The material is held because water surfaces come and go as the level moves.
 #[derive(Resource)]
-pub struct SharedMeshes {
+pub struct SharedAssets {
     cap: Handle<Mesh>,
     water: Handle<Mesh>,
+    water_material: Handle<StandardMaterial>,
+}
+
+/// A location's water surface, so the set of them can be rebuilt when the level moves.
+#[derive(Component)]
+pub struct WaterSurface;
+
+/// The level the whole grid is flooded to, in the same units as a height. Driven by the debug
+/// panel's slider.
+#[derive(Resource, Debug, PartialEq)]
+pub struct SeaLevel(pub f32);
+
+impl Default for SeaLevel {
+    fn default() -> Self {
+        Self(crate::hex::SEA_LEVEL)
+    }
+}
+
+/// Writes the sea level into the model, which is what actually decides where water is.
+///
+/// The model carries a level per location so that separate bodies can differ; a single sea level is
+/// simply the case where they all agree.
+// ponytail: one sea for the whole grid, so this overwrites any location given its own lake. Drop
+// the rewrite and edit only sea-connected locations when lakes become real.
+pub fn apply_sea_level(sea: Res<SeaLevel>, mut grid: ResMut<GridModel>) {
+    if !sea.is_changed() {
+        return;
+    }
+    crate::hex::flood(&mut grid, sea.0);
 }
 
 /// Both outline groups need a negative depth bias, because the lines are exactly coplanar with the
@@ -122,9 +153,16 @@ pub fn spawn_grid(
     grid: Res<GridModel>,
     layout: Res<HexLayout>,
 ) {
-    let shared = SharedMeshes {
+    let shared = SharedAssets {
         cap: meshes.add(hex_fan_mesh(&layout, 1.0 - INSET)),
         water: meshes.add(hex_fan_mesh(&layout, 1.0)),
+        water_material: materials.add(StandardMaterial {
+            base_color: WATER_FILL,
+            // Glossy, so the sun picks it out against the matte ground.
+            perceptual_roughness: 0.08,
+            reflectance: 0.7,
+            ..default()
+        }),
     };
 
     let cap_material = materials.add(StandardMaterial {
@@ -137,50 +175,69 @@ pub fn spawn_grid(
         perceptual_roughness: 0.95,
         ..default()
     });
-    let water_material = materials.add(StandardMaterial {
-        base_color: WATER_FILL,
-        // Glossy, so the sun picks it out against the matte ground.
-        perceptual_roughness: 0.08,
-        reflectance: 0.7,
-        ..default()
-    });
 
     let up = layout.plane.normal();
     for location in grid.iter() {
         let coord = location.coord;
-        let cell = commands
-            .spawn((
-                HexCell { coord },
-                cell_transform(&layout, coord),
-                Visibility::default(),
-                children![
-                    (
-                        Mesh3d(shared.cap.clone()),
-                        MeshMaterial3d(cap_material.clone()),
-                        // The cap rides at the location's own height; the parent's scale turns that
-                        // dimensionless height into world units along with everything else.
-                        Transform::from_translation(up * location.data.height),
-                    ),
-                    (
-                        HexWall { coord },
-                        Mesh3d(meshes.add(wall_mesh(&layout, &grid, coord))),
-                        MeshMaterial3d(wall_material.clone()),
-                    ),
-                ],
-            ))
-            .id();
-
-        for level in water_levels(&grid, coord) {
-            commands.spawn((
-                Mesh3d(shared.water.clone()),
-                MeshMaterial3d(water_material.clone()),
-                Transform::from_translation(up * (level + WATER_LIFT)),
-                ChildOf(cell),
-            ));
-        }
+        commands.spawn((
+            HexCell { coord },
+            cell_transform(&layout, coord),
+            Visibility::default(),
+            children![
+                (
+                    Mesh3d(shared.cap.clone()),
+                    MeshMaterial3d(cap_material.clone()),
+                    // The cap rides at the location's own height; the parent's scale turns that
+                    // dimensionless height into world units along with everything else.
+                    Transform::from_translation(up * location.data.height),
+                ),
+                (
+                    HexWall { coord },
+                    Mesh3d(meshes.add(wall_mesh(&layout, &grid, coord))),
+                    MeshMaterial3d(wall_material.clone()),
+                ),
+            ],
+        ));
     }
 
     commands.insert_resource(shared);
+}
+
+/// Rebuilds every water surface whenever the model's water changes — which is what a move of the
+/// sea level amounts to, since it decides both the level and which locations are wet at all.
+// ponytail: throws them all away and builds them again, which during a slider drag is a few dozen
+// entities a frame. Cheap at this size, and it keeps one code path for a set that changes shape.
+pub fn sync_water(
+    mut commands: Commands,
+    grid: Res<GridModel>,
+    layout: Res<HexLayout>,
+    shared: Option<Res<SharedAssets>>,
+    existing: Query<Entity, With<WaterSurface>>,
+    cells: Query<(Entity, &HexCell)>,
+) {
+    let Some(shared) = shared else {
+        return;
+    };
+    if !grid.is_changed() && !layout.is_changed() {
+        return;
+    }
+
+    for surface in &existing {
+        commands.entity(surface).despawn();
+    }
+
+    let up = layout.plane.normal();
+    for (entity, cell) in &cells {
+        for level in water_levels(&grid, cell.coord) {
+            commands.spawn((
+                WaterSurface,
+                Mesh3d(shared.water.clone()),
+                MeshMaterial3d(shared.water_material.clone()),
+                Transform::from_translation(up * (level + WATER_LIFT)),
+                ChildOf(entity),
+            ));
+        }
+    }
 }
 
 /// The water surfaces a location has to draw: its own, and any its neighbours have.
@@ -225,7 +282,7 @@ fn cell_transform(layout: &HexLayout, coord: Axial) -> Transform {
 pub fn sync_cells(
     layout: Res<HexLayout>,
     grid: Res<GridModel>,
-    shared: Option<Res<SharedMeshes>>,
+    shared: Option<Res<SharedAssets>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut cells: Query<(&HexCell, &mut Transform)>,
     walls: Query<(&HexWall, &Mesh3d)>,

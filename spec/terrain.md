@@ -122,7 +122,8 @@ grazing angles.
 
 **Water is a per-location level, and the depth buffer cuts the shoreline.** A location carries the
 surface level of the water covering it, or nothing — per location rather than global, so a mountain
-lake can stand above the sea it drains into. It draws as an opaque hexagon at full width covering
+lake can stand above the sea it drains into. A single sea level, which is all the debug panel's
+slider offers, is simply the case where every flooded location agrees; `hex::flood` writes it. It draws as an opaque hexagon at full width covering
 the location's whole territory, and the terrain occludes it wherever the ground is higher. The
 coastline therefore appears exactly where the terrain surface crosses the level, with no clipping,
 no shoreline geometry and no seam to get wrong.
@@ -203,6 +204,9 @@ Details that are load-bearing:
   `StandardMaterial::depth_bias` does not fix it: despite its documentation it only feeds the
   render-phase sort key, and the mesh pipeline hardcodes a zero rasterizer bias. See
   [[bevy-0-19-api]]. The consequence is that ground exactly at the water line reads as submerged.
+- **The sea level is a resource that writes into the model**, and the water surfaces are rebuilt
+  whenever the model's water changes — thrown away and respawned rather than edited in place, since
+  moving the level changes which locations are wet at all, not just how high the water sits.
 - **Picking tests cap planes only, and walls do not occlude.** At a grazing angle a low cap hidden
   behind a taller neighbour can still be picked; marked in the source as a known ceiling. Water is
   not picked at all, so clicking a lake selects the location beneath it.
@@ -231,9 +235,10 @@ Details that are load-bearing:
 - A bridge between two equal-height neighbours is level, and stays level with a cell twice their
   height on one of the corners they share. This is the regression test for the artefact above: it
   fails against the lattice-vertex rule and passes against the pairwise one.
-- Water: the generator floods exactly what lies below sea level, and a surface appears on a flooded
-  location and on each of its neighbours — but not one ring further out, which is the check that the
-  shoreline is covered without water spreading over dry ground.
+- Water: `flood` covers exactly what lies below the level and drains the rest, at a level that can
+  rise and fall again; and a surface appears on a flooded location and on each of its neighbours —
+  but not one ring further out, which is the check that the shoreline is covered without water
+  spreading over dry ground.
 - Selection: looking straight down picks the hex below at two height scales, at the centre and 80%
   of the way to a corner; a shallow ray crossing a low cell's airspace and a tall one's east wall
   picks the tall one; a ray passing just over it and away picks nothing.
@@ -246,9 +251,14 @@ plainly a knife edge); and flat-top, which is the orientation a wrong `corner_di
 apart. Sampling the rendered image put the darkest terrain tone at `(30,35,47)` against a lit
 `(91,100,123)` — what "shadowed but not black" was tuned to.
 
+The sea level was confirmed the same way, by starting the app at a raised level rather than by
+dragging: at `+0.45` only the highest locations stay clear of the water and the shoreline is still
+seamless, which exercises the whole chain — level, flood, one-ring rule, rebuilt surfaces.
+
 **Not verified:** actual mouse interaction. As [[hex-grid]] already records, no pointer injection
 is available on this machine, so picking is covered by its unit tests over synthetic rays and not by
-a real click. Clicking a cap, a wall, and empty sky are the three cases worth confirming by hand.
+a real click. Clicking a cap, a wall, and empty sky are the three cases worth confirming by hand —
+and now dragging the sea-level slider, which has never been dragged, only preset.
 
 ## Implementation status
 

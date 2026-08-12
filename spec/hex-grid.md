@@ -104,7 +104,8 @@ constants that had already been adjusted three times by observation.
 **Controls are cycling buttons plus a checkbox, not radio lists.** `bevy_ui_widgets` has radio groups,
 but a cycle is one entity and one observer arm, and this is a debug panel. "No labels" is a fourth
 `LabelMode` rather than a separate flag, so a single piece of state governs the labels and there is
-nothing to disagree with.
+nothing to disagree with. [[terrain]] added a fifth control, a slider, for a value that is
+continuous rather than a choice between named states.
 
 ## Coordinate conventions
 

@@ -41,9 +41,11 @@ impl Plugin for HexViewPlugin {
             .init_resource::<selection::Selected>()
             .init_resource::<labels::LabelMode>()
             .init_resource::<compass::ShowCompass>()
+            .init_resource::<grid_render::SeaLevel>()
             .init_resource::<framing::ResetViewRequested>()
             .add_observer(debug_ui::on_button_activate)
             .add_observer(debug_ui::on_checkbox_changed)
+            .add_observer(debug_ui::on_slider_changed)
             .add_systems(
                 Startup,
                 (
@@ -60,6 +62,11 @@ impl Plugin for HexViewPlugin {
                 (
                     selection::select_on_click,
                     framing::reset_view,
+                    // The slider writes a level; the model decides from it which locations are
+                    // wet, and only then can the surfaces be rebuilt.
+                    grid_render::apply_sea_level,
+                    grid_render::sync_water.after(grid_render::apply_sea_level),
+                    debug_ui::position_slider_thumbs,
                     // Everything that reacts to the layout changing — scale, or the orientation
                     // toggle, which moves every hex and rotates the axes.
                     grid_render::sync_cells,

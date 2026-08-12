@@ -7,18 +7,32 @@
 
 use bevy::prelude::*;
 use bevy::ui::Checked;
-use bevy::ui_widgets::{checkbox_self_update, Activate, Button, Checkbox, ValueChange};
+use bevy::ui_widgets::{
+    checkbox_self_update, slider_self_update, Activate, Button, Checkbox, Slider, SliderRange,
+    SliderThumb, SliderValue, ValueChange,
+};
 
 use super::compass::ShowCompass;
 use super::framing::ResetViewRequested;
+use super::grid_render::SeaLevel;
 use super::labels::LabelMode;
 use super::layout::HexLayout;
 use super::selection::Selected;
 
 const PANEL_BG: Color = Color::srgba(0.04, 0.05, 0.08, 0.82);
 const CONTROL_BG: Color = Color::srgb(0.18, 0.26, 0.38);
+const TRACK_BG: Color = Color::srgb(0.10, 0.14, 0.20);
+const THUMB: Color = Color::srgb(0.45, 0.70, 0.90);
 const TEXT: Color = Color::srgb(0.88, 0.91, 0.96);
 const DIM: Color = Color::srgb(0.60, 0.65, 0.74);
+
+/// The slider's travel, in the same units as a height. The terrain spans about `-1..=1`, so the
+/// ends of the track drain the grid completely and drown it completely.
+const SEA_LEVEL_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
+
+/// The thumb's width as a percentage of the track, kept out of the travel so it cannot overhang
+/// either end.
+const THUMB_WIDTH: f32 = 9.0;
 
 const EMPTY_READOUT: &str = "click a hexagon";
 /// Fixed, unlike the other captions — this button reports no state.
@@ -34,6 +48,7 @@ pub enum Control {
     LabelMode,
     Orientation,
     Compass,
+    SeaLevel,
     ResetView,
 }
 
@@ -46,6 +61,7 @@ pub fn spawn_debug_ui(
     mode: Res<LabelMode>,
     layout: Res<HexLayout>,
     show_compass: Res<ShowCompass>,
+    sea: Res<SeaLevel>,
 ) {
     commands
         .spawn((
@@ -81,7 +97,54 @@ pub fn spawn_debug_ui(
                 orientation_caption(layout.orientation),
             );
             spawn_checkbox(panel, Control::Compass, show_compass.0, "compass");
+            spawn_slider(panel, Control::SeaLevel, sea.0);
             spawn_button(panel, Control::ResetView, RESET_CAPTION.to_string());
+        });
+}
+
+/// A captioned slider: the caption above, the track below, and a thumb inside the track that
+/// [`position_slider_thumbs`] moves. The widget is headless — it reads the drag and reports a
+/// value; every pixel of it is ours.
+fn spawn_slider(panel: &mut ChildSpawnerCommands, control: Control, value: f32) {
+    panel
+        .spawn(Node {
+            flex_direction: FlexDirection::Column,
+            row_gap: Val::Px(4.0),
+            ..default()
+        })
+        .with_children(|group| {
+            group.spawn((
+                ControlCaption(control),
+                Text::new(sea_level_caption(value)),
+                TextFont::from_font_size(12.0),
+                TextColor(TEXT),
+            ));
+            group
+                .spawn((
+                    control,
+                    Slider::default(),
+                    SliderValue(value),
+                    SliderRange::from_range(SEA_LEVEL_RANGE),
+                    Node {
+                        width: Val::Percent(100.0),
+                        height: Val::Px(14.0),
+                        ..default()
+                    },
+                    BackgroundColor(TRACK_BG),
+                ))
+                .observe(slider_self_update)
+                .with_children(|track| {
+                    track.spawn((
+                        SliderThumb,
+                        Node {
+                            position_type: PositionType::Absolute,
+                            width: Val::Percent(THUMB_WIDTH),
+                            height: Val::Percent(100.0),
+                            ..default()
+                        },
+                        BackgroundColor(THUMB),
+                    ));
+                });
         });
 }
 
@@ -151,6 +214,27 @@ fn checkbox_caption(checked: bool, name: &str) -> String {
     format!("[{}] {name}", if checked { "x" } else { " " })
 }
 
+fn sea_level_caption(level: f32) -> String {
+    format!("sea level: {level:+.2}")
+}
+
+/// Puts each thumb where its value says. The widget deliberately leaves this to the caller, since
+/// it cannot know how the thumb is drawn; the travel is reduced by the thumb's own width so it
+/// stops flush with either end of the track rather than hanging over it.
+pub fn position_slider_thumbs(
+    sliders: Query<(&SliderValue, &SliderRange, &Children), Changed<SliderValue>>,
+    mut thumbs: Query<&mut Node, With<SliderThumb>>,
+) {
+    for (value, range, children) in &sliders {
+        let fraction = range.thumb_position(value.0);
+        for child in children {
+            if let Ok(mut node) = thumbs.get_mut(*child) {
+                node.left = Val::Percent(fraction * (100.0 - THUMB_WIDTH));
+            }
+        }
+    }
+}
+
 /// Buttons: cycle the state they own.
 pub fn on_button_activate(
     activate: On<Activate>,
@@ -180,13 +264,32 @@ pub fn on_checkbox_changed(
     }
 }
 
+/// Sliders: adopt the reported value. Separate from the checkbox observer because the payload type
+/// is what selects the event.
+pub fn on_slider_changed(
+    change: On<ValueChange<f32>>,
+    controls: Query<&Control>,
+    mut sea: ResMut<SeaLevel>,
+) {
+    if let Ok(Control::SeaLevel) = controls.get(change.source)
+        && sea.0 != change.value
+    {
+        sea.0 = change.value;
+    }
+}
+
 pub fn update_captions(
     mode: Res<LabelMode>,
     layout: Res<HexLayout>,
     show_compass: Res<ShowCompass>,
+    sea: Res<SeaLevel>,
     mut captions: Query<(&ControlCaption, &mut Text)>,
 ) {
-    if !mode.is_changed() && !layout.is_changed() && !show_compass.is_changed() {
+    if !mode.is_changed()
+        && !layout.is_changed()
+        && !show_compass.is_changed()
+        && !sea.is_changed()
+    {
         return;
     }
     for (caption, mut text) in &mut captions {
@@ -194,6 +297,7 @@ pub fn update_captions(
             Control::LabelMode => label_caption(*mode),
             Control::Orientation => orientation_caption(layout.orientation),
             Control::Compass => checkbox_caption(show_compass.0, "compass"),
+            Control::SeaLevel => sea_level_caption(sea.0),
             Control::ResetView => RESET_CAPTION.to_string(),
         };
     }

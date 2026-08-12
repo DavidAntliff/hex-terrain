@@ -128,3 +128,18 @@ Append-only, newest at the bottom. Keep the prefix consistent so it stays greppa
   Fixed geometrically with a hair of lift. Recorded in [[bevy-0-19-api]].
 - Honest limitation: it reads as flat blue paint, since a smooth plane under one directional light
   with no environment map has nothing to reflect.
+
+## [2026-08-12] feature | sea-level slider
+
+- The debug panel gains a slider over `-1..=1`, the first control for a continuous value rather than
+  a choice between named states. `bevy_ui_widgets::Slider` is headless like the rest: it reports
+  `ValueChange<f32>` and maintains `SliderValue`, but never moves the thumb — that is the caller's,
+  via `SliderRange::thumb_position`. Recorded in [[bevy-0-19-api]].
+- Flooding moved out of the terrain generator into `hex::flood(grid, level)`, so the generator makes
+  dry land and the level is applied separately and repeatedly. The slider writes a `SeaLevel`
+  resource, that writes the model, and the water surfaces are rebuilt from the model — the level
+  never reaches the renderer directly.
+- Surfaces are despawned and respawned wholesale on a change, because moving the level changes which
+  locations are wet at all, not merely how high the water sits.
+- Verified by starting at a raised level rather than by dragging: at `+0.45` only the highest
+  locations stay clear and the shoreline is still seamless.
