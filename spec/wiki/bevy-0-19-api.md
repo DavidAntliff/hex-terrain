@@ -86,5 +86,5 @@ doesn't fit.
 
 ## Related
 
-- [[sandbox-scene]]: the spec whose implementation depends on all of the above
+- [[scene]]: the spec whose implementation depends on all of the above
 - [[build-performance]]: build-time consequences of depending on Bevy

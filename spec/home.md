@@ -31,11 +31,15 @@ Two directions of knowledge, deliberately kept apart:
 
 ## Specs
 
-- [[sandbox-scene]]: the 3D sandbox — cube at origin, starfield skybox, orbit camera, native
-  and web. `status: implemented`.
+- [[hex-grid]]: the coordinate systems and grid model, plus the view that makes them visible —
+  labels, axis compass, click selection, debug readout. `status: implemented`.
+- [[scene]]: the scene shell — starfield skybox, orbit camera, clean exit, native and web build
+  paths. `status: implemented`.
 
 ## Wiki
 
+- [[hex-coordinates]]: the axial/cube/doubled formulas as implemented, the layout matrices, and the
+  derivation of where the axes point (with the step-vs-axis trap that catches everyone).
 - [[bevy-0-19-api]]: Bevy 0.19 API facts verified against the vendored source — the
   Event→Message rename, skybox cubemaps, mouse input, what the built-in camera controllers do
   and don't cover.
@@ -50,7 +54,9 @@ Two directions of knowledge, deliberately kept apart:
 Pages worth writing when the need arises. A `[[link]]` to a page that doesn't exist yet is
 fine — it marks one of these.
 
-- `hex-grid`: the hex coordinate system, once terrain work starts. This is the project's
-  reason to exist and has no page yet because no code exists yet.
-- `camera-controls`: promote out of [[sandbox-scene]] if the camera grows beyond orbit+zoom
+- `terrain`: elevation and biome data. `Location`'s payload is an empty `Terrain` placeholder, so
+  the grid is already generic over it — this is the next real feature.
+- `hex-algorithms`: ranges, rotations, line drawing and pathfinding. The reference covers them all;
+  none are implemented, and cube coordinates are in place to make them easy.
+- `camera-controls`: promote out of [[scene]] if the camera grows beyond orbit+zoom
   (panning, focus targets, keyboard movement).

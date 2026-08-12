@@ -92,9 +92,9 @@ crossing face boundaries without a discontinuity.
   prints.
 - **No JWST all-sky image exists.** Webb images deep patches of sky. Any "JWST skybox" is
   necessarily a deep field repeated across the cube faces, with discontinuities at every face
-  boundary. See [[sandbox-scene]] → Design discussion.
+  boundary. See [[scene]] → Design discussion.
 
 ## Related
 
-- [[sandbox-scene]]: the spec that locks the cubemap decision
+- [[scene]]: the spec that locks the cubemap decision
 - [[bevy-0-19-api]]: how the stacked PNG is reinterpreted as a cubemap at load time

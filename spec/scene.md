@@ -4,20 +4,20 @@ type: spec
 status: implemented
 updated: 2026-08-12
 ---
-# Spec: 3D sandbox scene
+# Spec: Scene shell
 
-The starting scene for hex-terrain work: a single cube at the origin, an all-sky starfield, and
-an orbit camera, running both natively and in a browser. It exists to be iterated in — every
-later feature is added to this scene.
+The shell every other feature is displayed in: an all-sky starfield, an orbit camera, clean exit,
+and the native and web build paths. What the scene *contains* is other specs' business — currently
+[[hex-grid]].
 
 ## Requirements
 
 ### Goal (definition of done)
 
-`cargo run` opens a window showing a lit cube at the origin against a starfield in every
-direction; right-drag orbits the camera about the origin, the scroll wheel zooms, Escape exits
-cleanly. The same scene, built to wasm and served by any static web server, renders identically
-in Firefox and Chrome.
+`cargo run` opens a window showing the scene's contents against a starfield in every direction;
+right-drag orbits the camera about the origin, the scroll wheel zooms, Escape exits cleanly. The
+same scene, built to wasm and served by any static web server, renders identically in Firefox and
+Chrome.
 
 ### Constraints
 
@@ -33,11 +33,12 @@ in Firefox and Chrome.
 
 ### Functional requirements
 
-In scope: the cube, the skybox, orbit + zoom + exit input, the native and web build paths, and
-the tooling that generates the skybox texture.
+In scope: the skybox, lighting, orbit + zoom + exit input, the native and web build paths, the
+tooling that generates the skybox texture, and the scripted-screenshot mechanism used to verify
+any of it.
 
-Out of scope, deliberately: hex grids and terrain (the project's actual subject, not yet
-started), lighting the scene from the skybox, UI, and any gameplay.
+Out of scope, deliberately: whatever the scene displays (see [[hex-grid]]), lighting the scene
+*from* the skybox, and any gameplay.
 
 ## Design discussion
 
@@ -73,11 +74,11 @@ Bevy's `wasm-bindgen` by hand on every upgrade. Locked.
 
 ## Implementation details
 
-`src/main.rs` holds the whole app, four systems and one component:
+`src/main.rs` is app wiring: plugins, resources, lighting, the camera, and the skybox. The camera
+lives in `src/camera.rs` and the screenshot mechanism in `src/screenshot.rs`.
 
-- `setup` — spawns the cube (`Mesh3d` + `MeshMaterial3d`), a `DirectionalLight`, a
-  `GlobalAmbientLight` resource, and the camera carrying `Camera3d`, a `Transform` from
-  `place()`, the `Skybox` component, and `Orbit`.
+- `setup` — spawns a `DirectionalLight`, a `GlobalAmbientLight` resource, and the camera carrying
+  `Camera3d`, a `Transform` from `place()`, the `Skybox` component, and `Orbit`.
 - `place(&Orbit) -> Transform` — the single place spherical coordinates become a transform,
   shared by `setup` and `orbit` so the first frame is already correct.
 - `patch_cubemap` — a PNG carries no cubemap metadata, so once the image loads this calls
@@ -93,6 +94,14 @@ Bevy's `wasm-bindgen` by hand on every upgrade. Locked.
   unusable in the browser while feeling fine natively.
 - `exit_on_escape` — writes `AppExit::Success`, which is the graceful path: Bevy finishes the
   frame, drops the world and closes the window itself.
+- `ScreenshotOnDemandPlugin` — `HEX_TERRAIN_SCREENSHOT=<path>` renders 120 frames, saves a PNG of
+  the framebuffer, waits for the asynchronous write, then exits. It exists because capturing the
+  window through the X server is unreliable: a window on an inactive workspace is unmapped and
+  yields a blank image, so scripted visual verification has to come from inside the app.
+
+The crate is a **library plus a binary** (`src/lib.rs`, `src/main.rs`). The split is what makes
+the model a real API boundary rather than a convention, and it keeps the compiler honest — public
+items in a binary-only crate read as dead code, which buries genuine warnings.
 
 Supporting files: `index.html` (trunk entry point, copies `assets/`), `Cargo.toml` (the
 target-scoped dynamic-linking dependency and the dev-profile opt-levels),
@@ -108,8 +117,9 @@ Performed:
 - `cargo test` — one test presses Escape through `ButtonInput` and asserts
   `App::should_exit() == Some(AppExit::Success)`, covering the key code, the system
   registration, and the message reaching the app.
-- `cargo run` — window opens on Vulkan, screenshot confirms the lit cube, the Milky Way band,
-  and no seams at cube-face boundaries. Confirmed the app runs untouched without exiting.
+- `cargo run` — window opens on Vulkan, screenshot confirms the scene contents lit against the
+  Milky Way band, with no seams at cube-face boundaries. Confirmed the app runs untouched without
+  exiting.
 - `trunk build --release`, served by a static web server — screenshots confirm an identical
   render in **both Chrome and Firefox**, with the wasm, JS, and cubemap all fetched `200`. A
   `404` on `starmap_cubemap.png.meta` is Bevy's normal asset-meta probe, not a fault.
@@ -125,17 +135,23 @@ inspection only. **Anyone changing the input code should confirm the feel manual
 
 Deliberate omissions, each marked with a `ponytail:` comment at the relevant site in the code:
 
-- The skybox does not light the cube. Doing so needs `EnvironmentMapLight` with a prefiltered
+- The skybox does not light the scene. Doing so needs `EnvironmentMapLight` with a prefiltered
   KTX2 environment map, which requires `toktx`/`basisu` tooling that is not currently used.
 - `Orbit` has no `target` field; the camera cannot pan.
-- Cube faces are 1024². The generator's `FACE` constant can go to 2048 at the cost of web load
+- Cubemap faces are 1024². The generator's `FACE` constant can go to 2048 at the cost of web load
   time.
+
+The camera's default `radius` and the compass placement are tuned together so that both fit the
+default view. The horizontal extent of the view depends on window aspect ratio, so a widget placed
+to the side of the grid falls off-screen in a portrait window — which is why the compass sits south
+of the grid. Changing either constant means re-checking the framing.
 
 Known rough edges that are not spec divergences: the release wasm bundle is ~51 MB plus ~11 MB
 of assets, untuned; and the committed cubemap is 10.8 MB of binary in git history.
 
 ## Related
 
+- [[hex-grid]]: what the scene currently displays
 - [[skybox-pipeline]]: how the cubemap asset is generated
 - [[bevy-0-19-api]]: the API facts this implementation relies on
 - [[build-performance]]: why the dependency is target-scoped, with the measurements

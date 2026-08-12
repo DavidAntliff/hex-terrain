@@ -95,5 +95,5 @@ are the obvious levers if it starts to matter.
 
 ## Related
 
-- [[sandbox-scene]]: the spec recording dynamic linking as a locked decision
+- [[scene]]: the spec recording dynamic linking as a locked decision
 - [[bevy-0-19-api]]: what depending on Bevy 0.19 means at the API level

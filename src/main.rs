@@ -1,18 +1,22 @@
-//! Minimal 3D scene to iterate in: a cube at the origin, an all-sky starfield, and an
-//! orbit camera (right-drag to rotate, scroll to zoom).
+//! A hex grid to iterate terrain work in: a side-4 hexagon of locations under a starfield, with an
+//! orbit camera, click selection and coordinate labels.
 
 use bevy::{
-    input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit},
     light::Skybox,
     prelude::*,
     render::render_resource::{TextureViewDescriptor, TextureViewDimension},
 };
 
+use hex_terrain::camera::{self, place, Orbit};
+use hex_terrain::hex::{Terrain, TerrainGrid};
+use hex_terrain::screenshot::ScreenshotOnDemandPlugin;
+use hex_terrain::view::{GridModel, HexLayout, HexViewPlugin, GRID_RADIUS};
+
 /// Vertical 1x6 strip, wgpu face order: +X -X +Y -Y +Z -Z. See `tools/make_skybox.py`.
 const CUBEMAP: &str = "textures/starmap_cubemap.png";
 
-const LOOK_SENSITIVITY: f32 = 0.005;
-const ZOOM_SENSITIVITY: f32 = 0.1;
+/// Hexagon circumradius in world units. The one scaling knob for the whole grid.
+const HEX_SCALE: f32 = 1.0;
 
 fn main() {
     App::new()
@@ -24,36 +28,15 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins((HexViewPlugin, ScreenshotOnDemandPlugin))
+        .insert_resource(HexLayout::pointy(HEX_SCALE))
+        .insert_resource(GridModel(TerrainGrid::hexagon(GRID_RADIUS, |_| Terrain)))
         .add_systems(Startup, setup)
-        .add_systems(Update, (patch_cubemap, orbit, exit_on_escape))
+        .add_systems(Update, (patch_cubemap, camera::orbit, exit_on_escape))
         .run();
 }
 
-/// Camera position in spherical coordinates about the origin.
-// ponytail: target is always the origin. Add a `target: Vec3` when panning is needed.
-#[derive(Component)]
-struct Orbit {
-    yaw: f32,
-    pitch: f32,
-    radius: f32,
-}
-
-fn place(o: &Orbit) -> Transform {
-    let dir = Quat::from_euler(EulerRot::YXZ, o.yaw, -o.pitch, 0.0) * Vec3::Z;
-    Transform::from_translation(dir * o.radius).looking_at(Vec3::ZERO, Vec3::Y)
-}
-
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    assets: Res<AssetServer>,
-) {
-    commands.spawn((
-        Mesh3d(meshes.add(Cuboid::default())),
-        MeshMaterial3d(materials.add(Color::srgb_u8(124, 144, 255))),
-    ));
-
+fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((
         DirectionalLight {
             illuminance: 10_000.0,
@@ -64,19 +47,15 @@ fn setup(
 
     commands.insert_resource(GlobalAmbientLight {
         color: Color::srgb_u8(180, 190, 220),
-        brightness: 200.0,
+        brightness: 400.0,
         ..default()
     });
 
-    let orbit = Orbit {
-        yaw: 0.6,
-        pitch: 0.4,
-        radius: 6.0,
-    };
+    let orbit = Orbit::default();
     commands.spawn((
         Camera3d::default(),
         place(&orbit),
-        // ponytail: the skybox is decoration only, it does not light the cube. For that add
+        // ponytail: the skybox is decoration only, it does not light the grid. For that add
         // EnvironmentMapLight, which needs a prefiltered KTX2 map (toktx/basisu).
         Skybox {
             image: Some(assets.load(CUBEMAP)),
@@ -131,6 +110,7 @@ fn patch_cubemap(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hex_terrain::hex::{Axial, Cube, Doubled};
 
     // Escape cannot be sent by hand in a headless check, so verify the wiring instead: the
     // right key code, the system registered, and an actual AppExit reaching the app.
@@ -149,28 +129,22 @@ mod tests {
         app.update();
         assert_eq!(app.should_exit(), Some(AppExit::Success));
     }
-}
 
-fn orbit(
-    buttons: Res<ButtonInput<MouseButton>>,
-    motion: Res<AccumulatedMouseMotion>,
-    scroll: Res<AccumulatedMouseScroll>,
-    camera: Single<(&mut Orbit, &mut Transform)>,
-) {
-    let (mut orbit, mut transform) = camera.into_inner();
-
-    if buttons.pressed(MouseButton::Right) {
-        orbit.yaw -= motion.delta.x * LOOK_SENSITIVITY;
-        // Stop just short of the poles, where `looking_at` degenerates.
-        orbit.pitch = (orbit.pitch - motion.delta.y * LOOK_SENSITIVITY).clamp(-1.55, 1.55);
+    /// The grid the app actually builds is the one the spec describes.
+    #[test]
+    fn the_scene_grid_is_a_hexagon_of_side_four() {
+        let grid = TerrainGrid::hexagon(GRID_RADIUS, |_| Terrain);
+        assert_eq!(grid.len(), 37);
+        assert!(grid.contains(Axial::ZERO));
     }
 
-    // Browsers report pixel deltas roughly 50x larger than a desktop mouse's line deltas.
-    let notches = match scroll.unit {
-        MouseScrollUnit::Line => scroll.delta.y,
-        MouseScrollUnit::Pixel => scroll.delta.y / 50.0,
-    };
-    orbit.radius = (orbit.radius * (1.0 - notches * ZOOM_SENSITIVITY)).clamp(1.5, 100.0);
-
-    *transform = place(&orbit);
+    /// The centre hex is the origin of every coordinate system, including world space.
+    #[test]
+    fn centre_hex_is_the_origin_of_all_systems() {
+        let layout = HexLayout::pointy(HEX_SCALE);
+        let centre = Axial::ZERO;
+        assert_eq!(centre.to_cube(), Cube::ZERO);
+        assert_eq!(centre.to_doubled(), Doubled::new(0, 0));
+        assert_eq!(layout.hex_to_world(centre), Vec3::ZERO);
+    }
 }
