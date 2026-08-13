@@ -1,7 +1,7 @@
 ---
 tags: [build, tooling, concept]
 type: concept
-updated: 2026-08-12
+updated: 2026-08-13
 ---
 # Build performance
 
@@ -79,8 +79,80 @@ once `serde`/`serde_json` had been added for [[instrumentation]]'s report. It wa
 serde contribution is not separated out. It is at most about a megabyte against a 52 MB baseline,
 which is why it was not worth measuring properly.
 
+## Shared build directory — adopted
+
+Every worktree used to get its own `target/`, which is expensive twice over. Measured on
+2026-08-13, with two worktrees in existence:
+
+| | |
+|---|---|
+| `hex-terrain/target` | 20 GB (14 GB `debug/deps`, 5.6 GB `wasm32-unknown-unknown`) |
+| `hex-terrain-camera/target` | 3.8 GB |
+| Free disk | 34 GB of 935 GB (97 % used) |
+
+**A compile cache does not fix this, and `kache` was already doing its job.** `kache stats` at the
+time: 48.2 % hit rate, ~37 min of compile work avoided in 24 h, and the 1.6 GiB `bevy_dylib`
+compile genuinely in the store (`kache why-miss bevy_dylib` shows the 27.7 s miss that populated
+it). But kache caches *compilations*, not the tree they land in — on a hit it still materialises
+~14 GB of artefacts into whichever `target/` asked. The duplication is structural.
+
+`.cargo/config.toml` at the repo root, checked in, therefore sets:
+
+```toml
+[build]
+build-dir = "{cargo-cache-home}/hex-terrain-build"
+```
+
+Three choices worth keeping:
+
+- **`build-dir`, not `target-dir`.** Only intermediates are shared. Each worktree keeps its own
+  `target/` holding the uplifted binary, so `cargo run` and `./target/debug/hex-terrain` stay
+  unambiguous per worktree. A shared `target-dir` would make `target/debug/hex-terrain` one
+  filename that every worktree overwrites. `build.build-dir` is stable — the 1.92 cargo reference
+  documents it without an unstable marker; only the `-Z build-dir-new-layout` *layout* is unstable.
+- **`{cargo-cache-home}` templating, not a relative path.** Resolves to `~/.cargo/hex-terrain-build`
+  on any machine. A relative `../hex-terrain-build` also works — config paths resolve against the
+  parent of the `.cargo` directory, so sibling worktrees land on the same place — but that silently
+  depends on worktrees staying siblings.
+- **Checked in, not gitignored.** That is the point: `git worktree add` yields a worktree that
+  already shares the build directory, with nothing to remember.
+
+Cargo config merges per key, so this leaves `build.rustc-wrapper = "kache"` in the user config
+alone. kache still runs, now backing one build directory instead of N.
+
+### What it bought
+
+Measured by adding a throwaway worktree twice — once without the config, once with it — against a
+shared directory already populated:
+
+| Fresh worktree, first `cargo build` | Wall clock | Disk it added |
+|---|---|---|
+| own `target/`, kache warm | 2 min 12 s | 7.2 GB |
+| **shared build dir** | **11.8 s** | **~0** |
+
+Populating the shared directory from nothing cost 17 min once, on a machine also running another
+build; that is the same one-off Bevy compile every worktree used to pay separately.
+
+"~0" is literal: cargo **hardlinks** the uplifted `target/debug/libbevy_dylib.so` to the file in the
+shared directory — same inode, link count 2 — so the 1.77 GB object exists once on disk while
+appearing in every worktree. `du` on a worktree's `target/` reports 1.9 GB, and it is a lie. This
+holds only because `~/.cargo` and the worktrees are on one filesystem; across filesystems cargo
+would have to copy.
+
+**No cross-worktree thrash.** The worry was that two worktrees would ping-pong-recompile the same
+crates. They do not: after the second worktree's first build, alternating `cargo build` between the
+two is 0.3 s each way. The six crates recompiled during that first build (`bevy_anti_alias`,
+`bevy_ui_render`, `bevy_gizmos_render`, `bevy_internal`, `bevy_dylib`, `bevy`) settle once and stay
+settled.
+
 ## Traps
 
+- **A shared build directory serialises concurrent builds.** Cargo takes an exclusive lock on it,
+  so a second worktree building at the same time waits with *"Blocking waiting for file lock on
+  build directory"* rather than running in parallel. This is the price of the section above and it
+  is worth paying here, but it now spans worktrees rather than staying inside one — relevant if an
+  IDE runs `cargo check` in the background. The escape hatch is `CARGO_BUILD_BUILD_DIR` pointed at
+  a private path for that one consumer.
 - **A rustc wrapper caches compilations.** `build.rustc-wrapper` is set to `kache` in the user
   cargo config. Two consequences when benchmarking: a captured `rustc` command line starts with
   `kache …` and must have that prefix stripped or the "link" is served from cache in ~0.5 s and

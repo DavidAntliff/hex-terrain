@@ -91,8 +91,13 @@ no arguments and always shows the default.
 The last two are diagnostics for how a water surface is divided between bodies where they come close.
 
 Bevy is linked dynamically on native targets, which cuts an edit-rebuild cycle from ~40s to
-~2s. The binary therefore needs `libbevy_dylib.so` from `target/debug/deps/` at runtime —
-`cargo run` handles that, but copying the bare binary elsewhere will not work.
+~2s. The binary therefore needs `libbevy_dylib.so` alongside it at runtime — `cargo run` handles
+that, but copying the bare binary elsewhere will not work.
+
+`.cargo/config.toml` puts intermediate build artefacts in `~/.cargo/hex-terrain-build`, shared by
+every worktree of this project, so Bevy is compiled once rather than once per worktree. Each
+worktree still has its own `target/` for the final binary. The cost is that two worktrees building
+at the same time serialise on a lock; see `spec/wiki/build-performance.md`.
 
 ## Web
 

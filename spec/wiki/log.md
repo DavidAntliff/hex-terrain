@@ -377,6 +377,29 @@ actually rendered — so comparability is checkable instead of assumed. Recorded
   is now a pointer, and its "one dependency" constraint is scoped to the shell with the serde
   exemption named.
 
+## [2026-08-13] tooling | one build directory shared by every worktree
+
+**A checked-in `.cargo/config.toml` sets `build.build-dir` to `{cargo-cache-home}/hex-terrain-build`**,
+so Bevy's intermediates are compiled and stored once for the whole project instead of once per
+worktree. The working process in `CLAUDE.md` puts every task in its own worktree, and each was
+paying a full Bevy build and 3.8–20 GB of `target/` for the privilege — with four worktrees alive
+at once by the end of this change, on a disk already 97 % full.
+
+- **kache was working and was not the answer.** 48.2 % hit rate, ~37 min of compile avoided in 24 h,
+  and the 1.6 GiB `bevy_dylib` compile genuinely in its store. But a compile cache does not stop
+  cargo materialising ~14 GB of artefacts into each new `target/`; the duplication is structural.
+  Measured: a fresh worktree costs **2 min 12 s and 7.2 GB** with kache alone, **11.8 s and ~0** with
+  the shared directory. Details and the hardlink mechanism in [[build-performance]].
+- **`build-dir`, not `target-dir`**, so each worktree keeps its own `target/` and
+  `./target/debug/hex-terrain` still means *this* worktree's binary. The template variable rather
+  than a relative path, so nothing depends on worktrees being siblings.
+- The cost is a lock: concurrent builds in two worktrees serialise. Recorded as a trap.
+- Verified: `cargo run -- two-lakes` renders and captures from the shared directory, so the
+  dynamic-linking search path still resolves; alternating builds between two worktrees settle at
+  0.3 s with no ping-pong recompilation; `trunk build --release` succeeds, putting wasm
+  intermediates in the shared directory too and emitting a 52,238,516-byte `dist/*_bg.wasm` against
+  the 52,336,672 already recorded — unchanged, as it should be.
+
 ## [2026-08-13] feature | editor-style camera controls
 
 - New spec [[camera-controls]], promoted out of [[scene]], which had carried the camera since the

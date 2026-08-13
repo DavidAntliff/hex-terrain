@@ -1,0 +1,8 @@
+# Intermediate build artefacts go to one directory shared by every worktree of this project,
+# so Bevy — including the ~1.7 GB libbevy_dylib.so — is compiled and stored once rather than
+# once per worktree. Each worktree keeps its own `target/` for the final binary.
+#
+# The cost is a lock: two worktrees building at the same time serialise. See
+# spec/wiki/build-performance.md.
+[build]
+build-dir = "{cargo-cache-home}/hex-terrain-build"

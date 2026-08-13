@@ -10,6 +10,23 @@ measurements, and the traps already discovered — lives in `spec/`, not here.**
 demand rather than carrying it in every context, and re-derive nothing that is already written
 down there.
 
+## Working process
+
+**Work in a git worktree, on a branch. `main` is the common integration target and is never
+committed to directly.**
+
+- **Create the worktree at the start of a task**, before making any edits — doing it afterwards
+  gives up the point of it. The primary checkout stays usable while a change is in flight, which
+  matters here because builds are slow enough to be worth not losing; see
+  `spec/wiki/build-performance.md`.
+- **Merge into `main` when the work is done**, then delete the branch. A **single-commit branch
+  fast-forwards**; a branch of **two or more commits merges `--no-ff`**, so the set stays visible as
+  one piece of work and `git log --first-parent` reads one entry per feature. A merge commit over a
+  lone commit only restates it.
+- **Committing waits to be asked.** The workflow decides *where* work happens, not that it gets
+  committed unprompted. What has to land in the same commit as the code is below, under
+  *Working with specs* and *Maintaining the wiki*.
+
 ## Specifications (`spec/`)
 
 `spec/` is the project's ongoing specification and developer knowledge base, written as
