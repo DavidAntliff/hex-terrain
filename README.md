@@ -28,9 +28,9 @@ Turning is on the middle button rather than Unity's `Alt`+left because i3 — an
 managers — grab `Alt`+drag for themselves before the app ever sees it.
 
 The panel top right reports the selected hexagon in axial, cube and doubled coordinates plus world
-position, and carries five controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
-pointy-top against flat-top, show or hide the axis compass, move the sea level, and reset the view
-to look straight down with everything in frame.
+position, and carries six controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
+pointy-top against flat-top, show or hide the axis compass, hide the skirt to see the terrain as a
+bare shell, move the sea level, and reset the view to look straight down with everything in frame.
 
 See `spec/camera-controls.md` for why the bindings are these ones.
 

@@ -149,7 +149,7 @@ src/view/grid_render.rs  unit hex mesh, per-hex entities, outlines, highlight
 src/view/selection.rs    cursor ray → plane → hex
 src/view/labels.rs       LabelMode and the per-hex labels
 src/view/compass.rs      the axis compass
-src/view/debug_ui.rs     readout panel and the four controls
+src/view/debug_ui.rs     readout panel and its controls
 src/view/framing.rs      camera framing maths for the reset-view button
 src/hex/orientation.rs   Orientation — pointy/flat, and which doubled variant follows
 src/view/world_label.rs  UI text pinned to a world position
@@ -221,12 +221,13 @@ rotated with it, `+q` landing due east. World (1.50, 0.00, −0.87) for axial (1
 flat-top matrix by hand. Labels-off and compass-off were confirmed, as was the top-down reset framing
 in both a wide and a tall window.
 
-**Not verified:** actual mouse interaction — the click-to-select ray, the camera drag, and pressing any
-of the four controls. No pointer or key injection tool is available on this machine, so every state was
+**Not verified:** actual mouse interaction — the click-to-select ray and pressing the panel's
+controls. No pointer or key injection tool is available on this machine, so every state was
 reached by presetting resources rather than by clicking, and the raycast itself is covered only by the
 round-trip tests over the same projection code it uses. Someone should click around and confirm the
 feel, particularly that clicking a control does **not** also change the selection — that guard has
-never been exercised for real.
+never been exercised for real. The camera drags this once also listed are now confirmed by hand; see
+[[camera-controls]].
 
 ## Implementation status
 
