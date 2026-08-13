@@ -119,19 +119,3 @@ Pages serves it gzipped.
 
 The deploy is `.github/workflows/pages.yml`; it adds `--public-url /hex-terrain/`, which the
 subpath needs. See `spec/wiki/build-performance.md` for what that flag fixes.
-
-## The starfield cubemap
-
-**Nothing loads this.** The scene's sky was once an all-sky star map; it was replaced by the
-generated daylight sky when water arrived, because a night sky gives a mirror nothing to reflect.
-The generator and its asset are kept, unwired, for a possible night mode — see `spec/scene.md` and
-`spec/wiki/skybox-pipeline.md`.
-
-`assets/textures/starmap_cubemap.png` is committed, so nothing above needs this. To rebuild it
-(needs ImageMagick with the OpenEXR delegate, plus numpy):
-
-    python3 tools/make_skybox.py --check          # geometry asserts only
-    python3 tools/make_skybox.py --exposure 0.25  # download sources, reproject, write PNG
-
-Starfield imagery: *Deep Star Maps 2020*, NASA/Goddard Space Flight Center Scientific
-Visualization Studio, incorporating ESA/Gaia data. Public domain.
