@@ -14,7 +14,7 @@ use serde::Serialize;
 
 use crate::camera::Orbit;
 use crate::view::compass::ShowCompass;
-use crate::view::grid_render::{HexCell, HexWall, SeaLevel, WaterSurface};
+use crate::view::grid_render::{HexCell, HexSkirt, HexWall, SeaLevel, WaterSurface};
 use crate::view::labels::LabelMode;
 use crate::view::selection::Selected;
 use crate::view::{GridModel, HexLayout};
@@ -136,15 +136,19 @@ pub struct ReportSources<'w, 's> {
     pub compass: Res<'w, ShowCompass>,
     pub selected: Res<'w, Selected>,
     pub meshes: Res<'w, Assets<Mesh>>,
-    /// A cell's cap carries no marker of its own — it is the meshed child that is neither the wall
-    /// nor a water plate — so it is found through the parent rather than by a component.
+    /// A cell's cap carries no marker of its own — it is the meshed child that is none of the wall,
+    /// the skirt or a water plate — so it is found through the parent rather than by a component.
+    /// Every new kind of child has to be excluded here or it is counted as a cap.
     pub cell_children: Query<'w, 's, &'static Children, With<HexCell>>,
-    pub caps: Query<'w, 's, &'static Mesh3d, (Without<HexWall>, Without<WaterSurface>)>,
+    pub caps: Query<'w, 's, &'static Mesh3d, NotACap>,
     pub walls: Query<'w, 's, &'static Mesh3d, With<HexWall>>,
     pub water: Query<'w, 's, &'static Mesh3d, With<WaterSurface>>,
     pub diagnostics: Option<Res<'w, bevy::diagnostic::DiagnosticsStore>>,
     pub window: Query<'w, 's, &'static Window, With<bevy::window::PrimaryWindow>>,
 }
+
+/// Everything a cell's meshed child can be *other* than its cap, which carries no marker of its own.
+type NotACap = (Without<HexWall>, Without<HexSkirt>, Without<WaterSurface>);
 
 impl Report {
     pub fn collect(run: Run, sources: &ReportSources) -> Self {

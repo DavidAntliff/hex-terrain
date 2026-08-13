@@ -21,6 +21,11 @@
 //! unique per cell. They are children of a per-location entity, which is what makes a single
 //! location's visibility, or a single location's material, a one-component change.
 //!
+//! Under both hangs the **skirt**: a closed hexagonal prism reaching from the boundary of the
+//! location's hexagon down to a bottom of its own, so the surface is a solid seen from below rather
+//! than a shell. Where the grid ends and a location is under water, the skirt also carries the cut
+//! face of that water. It is a third child, and hiding every one of them leaves the bare shell.
+//!
 //! Faces are meshes; outlines are gizmos. Gizmos suit the outlines because they are immediate-mode,
 //! so switching which hex is highlighted costs nothing, and line width is a per-config-group
 //! setting — hence two groups rather than one.
@@ -53,6 +58,35 @@ pub struct Highlight;
 const CAP_FILL: Color = Color::srgb(0.16, 0.19, 0.26);
 const WALL_FILL: Color = Color::srgb(0.13, 0.16, 0.22);
 const WATER_FILL: Color = Color::srgb(0.06, 0.20, 0.34);
+
+/// Colour of water shallow enough to see the bottom through — the pale end of the shoaling ramp,
+/// [`WATER_FILL`] being the deep end.
+///
+/// **Linear, not sRGB.** It reaches the shader as a bare `vec3` and is mixed there against a base
+/// colour the material has already converted, so it has to arrive in the same space; the skirt's
+/// cross-section writes it as a vertex colour, which is linear too.
+const WATER_SHALLOW: LinearRgba = LinearRgba::rgb(0.10, 0.32, 0.36);
+
+/// Depth, in the model's height units, by which water has reached [`WATER_FILL`]. Shared by the
+/// surface's shoaling and by the cross-section's gradient, so the cut agrees with what it cuts.
+const WATER_SHALLOW_DEPTH: f32 = 0.55;
+
+/// How far the shallowest skirt reaches below the lowest ground in the grid, in dimensionless
+/// height. A floor common to the whole grid rather than a depth below each cap: a cell's own
+/// boundary dips towards its lower neighbours, so a depth measured from its cap could leave that
+/// boundary hanging under its own bottom.
+const SKIRT_BASE: f32 = 0.6;
+
+/// The step between the five skirt lengths [`wobble`] chooses between.
+///
+/// **Twice this must stay under [`SKIRT_BASE`]**, or the deepest wobble upwards lifts a bottom above
+/// the lowest ground and the prism turns inside out.
+const SKIRT_STEP: f32 = 0.12;
+
+const _: () = assert!(
+    2.0 * SKIRT_STEP < SKIRT_BASE,
+    "a wobble upwards could lift a bottom above the ground it hangs from"
+);
 
 /// How far a water surface is set **below** its stated level, in dimensionless height, to break an
 /// exact depth tie against the ground.
@@ -138,6 +172,18 @@ pub struct HexCell {
 pub struct HexWall {
     coord: Axial,
 }
+
+/// The child holding a cell's skirt: the closed prism that hangs from its hexagon's boundary, and
+/// the cross-section of any water standing over it at the grid's rim.
+#[derive(Component)]
+pub struct HexSkirt {
+    coord: Axial,
+}
+
+/// Whether the skirt is hidden, leaving the bare shell the surface used to be. Driven by the debug
+/// panel's checkbox, and off by default — the skirt is what closes the grid.
+#[derive(Resource, Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct HideSkirt(pub bool);
 
 /// The assets every location shares: the hexagon fan every cap is drawn from, and the material every
 /// water surface is drawn with.
@@ -231,8 +277,8 @@ pub fn spawn_grid(
             },
             extension: WaterExtension {
                 settings: WaterSettings {
-                    shallow: Vec3::new(0.10, 0.32, 0.36),
-                    shallow_depth: 0.55,
+                    shallow: Vec3::new(WATER_SHALLOW.red, WATER_SHALLOW.green, WATER_SHALLOW.blue),
+                    shallow_depth: WATER_SHALLOW_DEPTH,
                     amplitude: 0.15,
                     wavelength: 0.32,
                     speed: 0.05,
@@ -252,8 +298,17 @@ pub fn spawn_grid(
         perceptual_roughness: 0.95,
         ..default()
     });
+    // White, because the skirt carries its colour per vertex — rock along the prism, and the
+    // water's shoaling ramp across a cross-section. The standard material multiplies the two, so
+    // anything but white would tint both.
+    let skirt_material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        perceptual_roughness: 0.95,
+        ..default()
+    });
 
     let up = layout.plane.normal();
+    let lowest = lowest_height(&grid);
     for location in grid.iter() {
         let coord = location.coord;
         commands.spawn((
@@ -272,6 +327,11 @@ pub fn spawn_grid(
                     HexWall { coord },
                     Mesh3d(meshes.add(wall_mesh(&layout, &grid, coord))),
                     MeshMaterial3d(wall_material.clone()),
+                ),
+                (
+                    HexSkirt { coord },
+                    Mesh3d(meshes.add(skirt_mesh(&layout, &grid, coord, lowest))),
+                    MeshMaterial3d(skirt_material.clone()),
                 ),
             ],
         ));
@@ -453,6 +513,44 @@ pub fn sync_cells(
     }
 }
 
+/// Rebuilds every skirt when the model or the layout changes.
+///
+/// The model half is not idle: the sea level moves which locations are flooded, and a skirt at the
+/// rim carries a cross-section of that water.
+pub fn sync_skirts(
+    layout: Res<HexLayout>,
+    grid: Res<GridModel>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    skirts: Query<(&HexSkirt, &Mesh3d)>,
+) {
+    if !grid.is_changed() && !layout.is_changed() {
+        return;
+    }
+    let lowest = lowest_height(&grid);
+    for (skirt, handle) in &skirts {
+        if let Some(mut mesh) = meshes.get_mut(&handle.0) {
+            *mesh = skirt_mesh(&layout, &grid, skirt.coord, lowest);
+        }
+    }
+}
+
+/// Shows or hides every skirt at once, leaving the bare shell behind when hidden.
+pub fn sync_skirt_visibility(
+    hide: Res<HideSkirt>,
+    mut skirts: Query<&mut Visibility, With<HexSkirt>>,
+) {
+    if !hide.is_changed() {
+        return;
+    }
+    for mut visibility in &mut skirts {
+        *visibility = if hide.0 {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+    }
+}
+
 pub fn draw_outlines(
     mut grid_lines: Gizmos<GridLines>,
     mut highlight: Gizmos<Highlight>,
@@ -584,35 +682,189 @@ fn wall_mesh(layout: &HexLayout, grid: &TerrainGrid, coord: Axial) -> Mesh {
     let height = grid.get(coord).map_or(0.0, |l| l.data.height);
 
     let cap: [Vec3; 6] = core::array::from_fn(|j| corners[j] * (1.0 - INSET) + up * height);
-    // Edge `j` runs from corner `j` to corner `j + 1`.
-    let edge: [f32; 6] = core::array::from_fn(|j| edge_height(layout, grid, coord, j));
-    let corner: [f32; 6] = core::array::from_fn(|j| corner_height(layout, grid, coord, j));
-
-    // Where a bridge's far edge meets the hexagon's edge, near corner `j` of edge `j..k`: the
-    // midpoint of this cap's corner and the neighbour cap's, which lands on the shared edge short
-    // of the lattice vertex by the same inset.
-    let bridge_end = |j: usize, k: usize, elevation: f32| {
-        corners[j] * (1.0 - INSET / 2.0) + corners[k] * (INSET / 2.0) + up * elevation
-    };
+    let profile: [Profile; 6] = core::array::from_fn(|j| edge_profile(layout, grid, coord, j));
 
     let mut faces = Faces::with_capacity(24);
     for j in 0..6 {
         let (k, previous) = ((j + 1) % 6, (j + 5) % 6);
+        let [vertex, near, _, far, _] = profile[j];
 
         // The bridge: level along the edge, so two equal neighbours are joined by a level ramp no
         // matter how tall anything else touching their corners is.
-        let near = bridge_end(j, k, edge[j]);
-        let far = bridge_end(k, j, edge[j]);
         faces.push_flat([cap[j], cap[k], far]);
         faces.push_flat([cap[j], far, near]);
 
         // The wedge, between the two bridges either side of corner `j` and reaching the lattice
-        // vertex itself.
-        let vertex = corners[j] + up * corner[j];
+        // vertex itself — where the previous edge's profile ends.
         faces.push_flat([cap[j], near, vertex]);
-        faces.push_flat([cap[j], vertex, bridge_end(j, previous, edge[previous])]);
+        faces.push_flat([cap[j], vertex, profile[previous][3]]);
     }
     faces.build()
+}
+
+/// One edge's worth of a location's outer boundary: corner, bridge end, edge midpoint, bridge end,
+/// corner.
+type Profile = [Vec3; 5];
+
+/// The five points at which a location's surface meets the boundary of its own hexagon along edge
+/// `j`, running from corner `j` to corner `j + 1`. All five lie on that edge in plan; what varies is
+/// their height.
+///
+/// This is the seam [`wall_mesh`] and [`skirt_mesh`] share — the wall's outer rim above it, the
+/// skirt hanging from it below — so both take it from here rather than each rederiving it. The two
+/// inner points are where a bridge's far edge meets the hexagon: the midpoint of this cap's corner
+/// and the neighbour cap's, which lands on the shared edge short of the lattice vertex by the same
+/// inset.
+///
+/// The **edge midpoint** between them is the wall's to ignore. It splits the edge where [`Pieces`]
+/// splits it, which is what lets a water cross-section be granted the halves the body reaches and no
+/// more.
+fn edge_profile(layout: &HexLayout, grid: &TerrainGrid, coord: Axial, j: usize) -> Profile {
+    let unit = layout.unit();
+    let corners = unit.corner_offsets();
+    let up = unit.plane.normal();
+    let k = (j + 1) % 6;
+
+    let bridge = up * edge_height(layout, grid, coord, j);
+    [
+        corners[j] + up * corner_height(layout, grid, coord, j),
+        corners[j] * (1.0 - INSET / 2.0) + corners[k] * (INSET / 2.0) + bridge,
+        (corners[j] + corners[k]) * 0.5 + bridge,
+        corners[k] * (1.0 - INSET / 2.0) + corners[j] * (INSET / 2.0) + bridge,
+        corners[k] + up * corner_height(layout, grid, coord, k),
+    ]
+}
+
+/// A location's skirt: the closed hexagonal prism hanging from the boundary of its hexagon down to a
+/// bottom of its own, plus a cross-section of the water standing over it where the grid ends.
+///
+/// Closed on **every** location, not only the ones at the rim. Interior sides are buried, but
+/// emitting them costs a handful of triangles and buys the absence of a rule: no location has to
+/// know whether it is on the boundary, and the step between two neighbours' bottoms — which the
+/// wobble guarantees there will be — is closed by the deeper one's own side.
+///
+/// The water cross-section is the one thing that *is* confined to the rim, because it is the only
+/// part that is ever seen. It is taken from [`water_plates`], the same source the surfaces
+/// themselves come from, so the cut reaches exactly as far around the rim as the water does — which
+/// includes a dry location whose corner dips under a flooded neighbour's level.
+// ponytail: the buried interior sides are ~2/3 of the geometry here. Cull them against the
+// neighbours' bottoms if the grid ever grows enough for the triangle count to matter.
+fn skirt_mesh(layout: &HexLayout, grid: &TerrainGrid, coord: Axial, lowest: f32) -> Mesh {
+    let unit = layout.unit();
+    let corners = unit.corner_offsets();
+    let up = unit.plane.normal();
+    let bottom = skirt_bottom(lowest, coord);
+    let rock = WALL_FILL.to_linear();
+    // Moves a point of the profile to a given height, leaving it where it is in plan.
+    let sink = |v: Vec3, height: f32| v - up * v.dot(up) + up * height;
+
+    let plates = water_plates(layout, grid, coord);
+    // Eight triangles an edge, plus the fan underneath. A cut face grows it further.
+    let mut faces = Faces::with_capacity(6 * 8 + 6);
+    for j in 0..6 {
+        let profile = edge_profile(layout, grid, coord, j);
+
+        // The prism's side, in the four strips the profile divides the edge into. Wound so the
+        // outward face is the front one: the corners run clockwise seen from above, so a triangle
+        // taken along the edge and then downwards faces away from the centre.
+        for i in 0..4 {
+            let (near, far) = (profile[i], profile[i + 1]);
+            faces.push_shaded([near, far, sink(far, bottom)], [rock; 3]);
+            faces.push_shaded([near, sink(far, bottom), sink(near, bottom)], [rock; 3]);
+        }
+
+        // Beyond here is the water above the ground, which only shows where the grid stops.
+        if grid.contains(coord.neighbour(layout.corner_directions(j).0)) {
+            continue;
+        }
+        for (level, pieces) in &plates {
+            // The plate's own level, so the section's top edge lies in the surface rather than a
+            // hair above it.
+            let surface = level - WATER_TIE_BREAK;
+            for i in 0..4 {
+                // Strips 0 and 1 are the half of the sector nearer corner `j`, 2 and 3 the half
+                // nearer corner `j + 1` — the two pieces the plate is granted separately.
+                if !pieces[2 * j + i / 2] {
+                    continue;
+                }
+                let (near, far) = (profile[i], profile[i + 1]);
+                let (near_ground, far_ground) = (near.dot(up), far.dot(up));
+                if near_ground >= surface && far_ground >= surface {
+                    continue;
+                }
+                // An end whose ground already stands above the surface collapses to nothing rather
+                // than turning the strip inside out.
+                let (near_top, far_top) = (near_ground.max(surface), far_ground.max(surface));
+                let shade = |height: f32| shoaled(surface - height);
+                faces.push_shaded(
+                    [sink(near, near_top), sink(far, far_top), far],
+                    [shade(near_top), shade(far_top), shade(far_ground)],
+                );
+                faces.push_shaded(
+                    [sink(near, near_top), far, near],
+                    [shade(near_top), shade(far_ground), shade(near_ground)],
+                );
+            }
+        }
+    }
+
+    // The underside, facing down: the same fan as a cap, wound the other way.
+    let base = up * bottom;
+    for i in 0..6 {
+        faces.push_shaded(
+            [base, corners[i] + base, corners[(i + 1) % 6] + base],
+            [rock; 3],
+        );
+    }
+    faces.build()
+}
+
+/// The colour of water at a given depth below its surface: [`WATER_SHALLOW`] at the top, reaching
+/// [`WATER_FILL`] by [`WATER_SHALLOW_DEPTH`].
+///
+/// The same ramp `water.wgsl` applies across a plate, applied here down a vertical cut instead. On
+/// the plate the argument is how deep the water is at that point; here it is how far down the column
+/// the vertex sits. Both say the same thing — the first [`WATER_SHALLOW_DEPTH`] of water is the pale
+/// part — so the cut and the surface agree where they meet.
+fn shoaled(depth: f32) -> LinearRgba {
+    let t = (depth / WATER_SHALLOW_DEPTH).clamp(0.0, 1.0);
+    let deep = WATER_FILL.to_linear();
+    let mix = |shallow: f32, deep: f32| shallow + (deep - shallow) * t;
+    LinearRgba::rgb(
+        mix(WATER_SHALLOW.red, deep.red),
+        mix(WATER_SHALLOW.green, deep.green),
+        mix(WATER_SHALLOW.blue, deep.blue),
+    )
+}
+
+/// The lowest ground in the grid, which is the level every skirt hangs from. Infinite for an empty
+/// grid, which has no cells to hang anything under.
+fn lowest_height(grid: &TerrainGrid) -> f32 {
+    grid.iter()
+        .map(|l| l.data.height)
+        .fold(f32::INFINITY, f32::min)
+}
+
+/// Where a location's prism ends: a floor common to the whole grid, stepped by that location's own
+/// [`wobble`] so the underside is not one flat plate.
+fn skirt_bottom(lowest: f32, coord: Axial) -> f32 {
+    lowest - SKIRT_BASE + wobble(coord) as f32 * SKIRT_STEP
+}
+
+/// A deterministic `-2..=2` for a coordinate — what keeps the underside from being a smooth copy of
+/// the terrain above it.
+///
+/// A hand-rolled integer mix rather than `DefaultHasher`, whose output is explicitly not stable
+/// between toolchains, and rather than a crate, since `bevy` is the only dependency. Any avalanche
+/// would do; this is the usual xor-shift-multiply finalizer, which spreads neighbouring coordinates
+/// apart rather than banding them.
+fn wobble(coord: Axial) -> i32 {
+    let mut h =
+        (coord.q as u32).wrapping_mul(0x9E37_79B9) ^ (coord.r as u32).wrapping_mul(0x85EB_CA6B);
+    h ^= h >> 15;
+    h = h.wrapping_mul(0x2545_F491);
+    h ^= h >> 13;
+    (h % 5) as i32 - 2
 }
 
 /// The height of a bridge along one edge: the mean of this location and the one across it.
@@ -661,6 +913,9 @@ struct Faces {
     positions: Vec<Vec3>,
     normals: Vec<Vec3>,
     uvs: Vec<[f32; 2]>,
+    /// Empty unless the mesh is one that carries colours, which only the skirt is. A colour channel
+    /// on the others would specialize their pipeline for a value they never read.
+    colours: Vec<[f32; 4]>,
 }
 
 impl Faces {
@@ -669,6 +924,7 @@ impl Faces {
             positions: Vec::with_capacity(triangles * 3),
             normals: Vec::with_capacity(triangles * 3),
             uvs: Vec::with_capacity(triangles * 3),
+            colours: Vec::new(),
         }
     }
 
@@ -698,14 +954,33 @@ impl Faces {
         self.push(tri, normal);
     }
 
+    /// A triangle carrying a colour per vertex, normalled from its own winding.
+    ///
+    /// The colours are **linear**, since that is what a vertex colour is: the standard material
+    /// multiplies its own base colour by this one, having already converted its own out of sRGB.
+    fn push_shaded(&mut self, tri: [Vec3; 3], colours: [LinearRgba; 3]) {
+        self.push_flat(tri);
+        self.colours
+            .extend(colours.map(|c| [c.red, c.green, c.blue, c.alpha]));
+    }
+
     fn build(self) -> Mesh {
-        Mesh::new(
+        debug_assert!(
+            self.colours.is_empty() || self.colours.len() == self.positions.len(),
+            "a mesh carries a colour for every vertex or for none"
+        );
+        let mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
         )
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, self.positions)
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
+        if self.colours.is_empty() {
+            mesh
+        } else {
+            mesh.with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, self.colours)
+        }
     }
 }
 
@@ -765,8 +1040,10 @@ mod tests {
     fn every_face_is_wound_to_match_its_normal() {
         let grid = grid();
         for layout in layouts() {
+            let lowest = lowest_height(&grid);
             let mut meshes = vec![hex_fan_mesh(&layout, 1.0 - INSET)];
             meshes.extend(grid.coords().map(|c| wall_mesh(&layout, &grid, c)));
+            meshes.extend(grid.coords().map(|c| skirt_mesh(&layout, &grid, c, lowest)));
             for mesh in &meshes {
                 for ([v0, v1, v2], normal) in triangles(mesh) {
                     let geometric = (v1 - v0).cross(v2 - v0).normalize();
@@ -1169,6 +1446,214 @@ mod tests {
         }
     }
 
+
+    /// Colours as `[f32; 4]` per vertex, or empty for a mesh that carries none.
+    fn colours(mesh: &Mesh) -> Vec<[f32; 4]> {
+        match mesh.attribute(Mesh::ATTRIBUTE_COLOR) {
+            None => Vec::new(),
+            Some(bevy::mesh::VertexAttributeValues::Float32x4(c)) => c.clone(),
+            Some(other) => panic!("colours should be Float32x4, got {other:?}"),
+        }
+    }
+
+    fn positions(mesh: &Mesh) -> Vec<Vec3> {
+        mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+            .expect("positions")
+            .as_float3()
+            .expect("float3")
+            .iter()
+            .map(|v| Vec3::from_array(*v))
+            .collect()
+    }
+
+    /// The skirt hangs from the wall's own outer rim, which is the seam that must not crack. Both
+    /// take it from [`edge_profile`]; this is what fails if either grows its own copy.
+    ///
+    /// Bitwise, like the corner and bridge means it is built from — a vertex an ulp adrift is a
+    /// crack in a solid that is supposed to be closed.
+    #[test]
+    fn the_skirt_hangs_from_the_walls_own_rim() {
+        let grid = grid();
+        for layout in layouts() {
+            let lowest = lowest_height(&grid);
+            for coord in grid.coords() {
+                let wall = positions(&wall_mesh(&layout, &grid, coord));
+                let skirt = positions(&skirt_mesh(&layout, &grid, coord, lowest));
+                for j in 0..6 {
+                    let profile = edge_profile(&layout, &grid, coord, j);
+                    // The midpoint is the skirt's alone: the wall spans the bridge in one quad.
+                    for (i, point) in profile.iter().enumerate() {
+                        assert!(
+                            skirt.contains(point),
+                            "{coord:?} edge {j} point {i} is not on the skirt"
+                        );
+                        assert!(
+                            i == 2 || wall.contains(point),
+                            "{coord:?} edge {j} point {i} is not on the wall"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Two locations either side of an edge must hang their skirts from the same line, or the solid
+    /// splits open along it exactly as the surface would. Heights bitwise, positions to a tolerance
+    /// — they are reached by adding different centres, as `cells_agree_on_every_shared_edge_and_corner`
+    /// also allows.
+    #[test]
+    fn neighbours_hang_their_skirts_from_the_same_line() {
+        let grid = grid();
+        for layout in layouts() {
+            let unit = layout.unit();
+            let up = unit.plane.normal();
+            for coord in grid.coords() {
+                for j in 0..6 {
+                    let direction = layout.corner_directions(j).0;
+                    let neighbour = coord.neighbour(direction);
+                    if !grid.contains(neighbour) {
+                        continue;
+                    }
+                    let back = (direction + 3) % 6;
+                    let facing = (0..6)
+                        .find(|&e| layout.corner_directions(e).0 == back)
+                        .expect("the edge back this way");
+
+                    let ours = edge_profile(&layout, &grid, coord, j);
+                    let theirs = edge_profile(&layout, &grid, neighbour, facing);
+                    let (here, there) = (unit.hex_to_world(coord), unit.hex_to_world(neighbour));
+                    // Their edge runs the other way round the hexagon, so it reverses.
+                    for (mine, other) in ours.iter().zip(theirs.iter().rev()) {
+                        assert_eq!(
+                            mine.dot(up),
+                            other.dot(up),
+                            "{coord:?} edge {j} disagrees with {neighbour:?} on a height"
+                        );
+                        assert!(
+                            (here + *mine).abs_diff_eq(there + *other, EPS),
+                            "{coord:?} edge {j} disagrees with {neighbour:?} on a position"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// No prism may turn inside out: a bottom has to clear every piece of ground it hangs from, in
+    /// every scene. This is the invariant `SKIRT_STEP * 2 < SKIRT_BASE` buys, and the reason the
+    /// floor is common to the grid rather than measured down from each cap — a location's own
+    /// boundary dips towards its lower neighbours, well below its own height.
+    #[test]
+    fn every_skirt_hangs_below_the_terrain() {
+        let layout = HexLayout::pointy(1.0);
+        let up = layout.plane.normal();
+        for scene in crate::hex::scenes::names() {
+            let grid = crate::hex::scenes::build(scene).expect("a registered scene");
+            let lowest = lowest_height(&grid);
+            for coord in grid.coords() {
+                let bottom = skirt_bottom(lowest, coord);
+                for j in 0..6 {
+                    for point in edge_profile(&layout, &grid, coord, j) {
+                        assert!(
+                            bottom < point.dot(up),
+                            "{scene}: {coord:?} hangs from {} but ends at {bottom}",
+                            point.dot(up)
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Like the wall, a skirt covers its own hexagon and no more.
+    #[test]
+    fn a_skirt_stays_inside_its_own_hexagon() {
+        let layout = HexLayout::pointy(1.0);
+        let grid = grid();
+        let lowest = lowest_height(&grid);
+        let up = layout.plane.normal();
+        for coord in grid.coords() {
+            let mut reach: f32 = 0.0;
+            for v in positions(&skirt_mesh(&layout, &grid, coord, lowest)) {
+                reach = reach.max((v - v.dot(up) * up).length());
+            }
+            assert!((reach - 1.0).abs() < EPS, "{coord:?} reaches {reach}");
+        }
+    }
+
+    /// The water's cut face is the one part of a skirt confined to the rim, because it is the one
+    /// part that is ever seen. Inland the ground is all there is, however deep the sea over it.
+    #[test]
+    fn only_a_rim_skirt_cuts_through_the_water() {
+        let layout = HexLayout::pointy(1.0);
+        let mut grid: TerrainGrid = Grid::hexagon(2, |_| Terrain {
+            height: -1.0,
+            water: Some(0.0),
+        });
+        let lowest = lowest_height(&grid);
+        let rock = WALL_FILL.to_linear();
+        let is_rock = |c: [f32; 4]| c[0] == rock.red && c[1] == rock.green && c[2] == rock.blue;
+
+        let inland = skirt_mesh(&layout, &grid, Axial::ZERO, lowest);
+        assert!(
+            colours(&inland).into_iter().all(is_rock),
+            "an interior location has no water to cut"
+        );
+
+        // A corner of the hexagon: three of its six edges have no neighbour.
+        let rim = Axial::new(2, 0);
+        let cut = skirt_mesh(&layout, &grid, rim, lowest);
+        let up = layout.plane.normal();
+        let water: Vec<(Vec3, [f32; 4])> = positions(&cut)
+            .into_iter()
+            .zip(colours(&cut))
+            .filter(|(_, c)| !is_rock(*c))
+            .collect();
+        assert!(!water.is_empty(), "a flooded rim location shows its water");
+
+        let surface = -WATER_TIE_BREAK;
+        for (position, colour) in &water {
+            let height = position.dot(up);
+            assert!(height <= surface + EPS, "water above its own surface: {height}");
+            let expected = shoaled(surface - height);
+            assert!(
+                (colour[0] - expected.red).abs() < EPS,
+                "at {height} the cut should be {expected:?}, got {colour:?}"
+            );
+        }
+        // Pale at the surface and full deep at the bed, which is a unit down — well past
+        // `WATER_SHALLOW_DEPTH`.
+        let deep = WATER_FILL.to_linear();
+        assert!(water.iter().any(|(_, c)| c[0] == WATER_SHALLOW.red));
+        assert!(water.iter().any(|(_, c)| (c[0] - deep.red).abs() < EPS));
+
+        // And drain it: with no water anywhere the same location is all rock again.
+        crate::hex::flood(&mut grid, -2.0);
+        assert!(
+            colours(&skirt_mesh(&layout, &grid, rim, lowest))
+                .into_iter()
+                .all(is_rock),
+            "a drained location has nothing to cut"
+        );
+    }
+
+    /// The wobble is what keeps the underside from being a smooth copy of the terrain. It has to be
+    /// stable — the same grid must come out the same on every run and every toolchain — and it has
+    /// to actually use its range.
+    #[test]
+    fn the_wobble_is_stable_and_spends_its_whole_range() {
+        assert_eq!(wobble(Axial::ZERO), wobble(Axial::ZERO));
+        assert_eq!(wobble(Axial::new(0, 0)), -2);
+        assert_eq!(wobble(Axial::new(1, 0)), 1);
+        assert_eq!(wobble(Axial::new(-3, 2)), 2);
+
+        let seen: std::collections::BTreeSet<i32> = grid().coords().map(wobble).collect();
+        assert_eq!(
+            seen,
+            (-2..=2).collect(),
+            "a 37-cell grid should show every step"
+        );
+    }
 
     #[test]
     fn a_lone_cell_is_a_flat_plate() {

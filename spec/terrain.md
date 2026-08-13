@@ -149,12 +149,15 @@ is closed on both ends. Even for the prisms it would have meant a rotation, an o
 orientation, and a second source of hex geometry competing with `corner_offsets`. Recorded in
 [[bevy-0-19-api]] so it is not re-proposed.
 
-**Rejected: a skirt and an underside.** The surface is a bare shell: the grid's edge is a level lip
-with nothing beneath it. With back-face culling that means it is see-through from below, which the
-orbit camera can reach, and a raised rim cell shows sky underneath it at a low angle. Accepted
-deliberately, in exchange for the geometry staying purely a function of the heights. A skirt down
-to a base elevation and a flat bottom would close it, at the cost of a base depth that is a fudge
-and a boundary case in every builder.
+**A skirt and an underside, added later.** The surface here is a bare shell: the grid's edge is a
+level lip with nothing beneath it, so with back-face culling it is see-through from below, which the
+orbit camera can reach, and a raised rim cell shows sky underneath it at a low angle. That was
+accepted deliberately at first, in exchange for the geometry staying purely a function of the
+heights — the objection being a base depth that is a fudge and a boundary case in every builder.
+Both objections turned out to be answerable: the depth is a floor under the grid's own lowest
+ground, and a prism closed on *every* location has no boundary case to get wrong. See [[skirt]],
+which owns all of it; nothing in this spec changed to make room for it beyond the wall's outer rim
+becoming a shared function.
 
 **Shadows: one cascade, not four.** The default cascade configuration reaches 150 world units,
 which spends nearly all of the shadow map on empty space around a grid a few units across. One
@@ -303,8 +306,7 @@ whose constraint on that geometry this contradicts.
 Deliberate omissions:
 
 - The heights are a placeholder sinusoid. Real generation is the next thing this spec grows.
-- **The surface has no underside.** See the rejected skirt above: from below it is see-through, and
-  a raised rim cell shows sky beneath it at a low angle.
+- **The surface itself has no underside** — what closes it hangs below and belongs to [[skirt]].
 - One inset for the whole grid, not per location; and no per-height colouring or height in the debug
   readout — the readout's world position is still the hex centre on the plane, not the cap.
 - **How a water plate is *shaded* is no longer specified here** — see [[water]], which covers the
@@ -327,4 +329,5 @@ Deliberate omissions:
 - [[hex-coordinates]]: the corner↔direction relationship the walls are built on
 - [[bevy-0-19-api]]: the shadow, gizmo and primitive facts this depends on
 - [[water]]: how the water plates this spec places are shaded
+- [[skirt]]: what closes this surface from below, and cuts through its water at the rim
 - [[scene]]: the shell it is displayed in, and the lighting it adds to

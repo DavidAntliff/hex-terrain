@@ -399,3 +399,44 @@ at once by the end of this change, on a disk already 97 % full.
   0.3 s with no ping-pong recompilation; `trunk build --release` succeeds, putting wasm
   intermediates in the shared directory too and emitting a 52,238,516-byte `dist/*_bg.wasm` against
   the 52,336,672 already recorded — unchanged, as it should be.
+
+## [2026-08-13] feature | a skirt under the terrain, and a cut through its water
+
+- The surface is no longer a shell. Every location hangs a **closed hexagonal prism** from the
+  boundary of its own hexagon: six sides down from the wall's outer rim, and a bottom facing down.
+  New spec [[skirt]]; [[terrain]]'s *"Rejected: a skirt and an underside"* reversed by agreement, and
+  its "no underside" omission with it.
+- **The bottom is a common floor plus a per-location step.** `SKIRT_BASE = 0.6` under the grid's
+  lowest ground, `± 2 × SKIRT_STEP = 0.12` from a hash of the coordinate. Measuring down from each
+  cap instead — the obvious reading of "extend downwards a distance" — is both a smooth copy of the
+  terrain and unsafe: a location's own boundary dips towards its lower neighbours, so a cap beside a
+  deep one can hang below its own bottom. `2·SKIRT_STEP < SKIRT_BASE` is a `const _: () = assert!`.
+- **Closing every location, rather than only the rim, is what removes the boundary case** that got a
+  skirt rejected in the first place. Rim-only sides plus per-location bottoms leaves a hole at every
+  step between two neighbours' undersides, and closing those needs a second rule with a sign to get
+  wrong. ~54 triangles a location, ~2k for the grid — the interior sides are buried and not culled.
+- **The wall's outer rim is now a shared function**, `edge_profile`: five points along one edge —
+  corner, bridge end, edge midpoint, bridge end, corner. The wall ignores the midpoint; the skirt
+  needs it, because it splits the edge exactly where `Pieces` does and so lets a water cut be granted
+  the halves the body reaches. Both build from it, checked bitwise, since a crack here is a hole in
+  something whose whole point is being closed.
+- **The water cut is taken from `water_plates`, not from the location's own `Terrain::water`.** Under
+  the one-ring rule a *dry* rim location carries a flooded neighbour's plate wherever its boundary
+  dips below that level; testing its own water would leave that plate cut off in mid-air at the grid's
+  edge.
+- **`water.wgsl` cannot shade the cut**: it sets the fragment normal to point straight up, which is
+  right for a level plate and lights a vertical face as though it faced the sky. Vertex colours
+  instead, ramped on the CPU with the same two colours and the same `WATER_SHALLOW_DEPTH` the surface
+  shoals over — now named constants rather than literals inside `WaterSettings`. Vertex colours turn
+  out to *replace* the base colour before multiplying back into it, and to be linear; recorded in
+  [[bevy-0-19-api]] against the vendored 0.19 source.
+- The probe's cap count identifies a cap negatively, as the meshed child that is neither wall nor
+  plate. A third kind of child silently became a cap until it was excluded — worth knowing before the
+  fourth.
+- Verified: 81 tests (was 75), six new — the bitwise seam against the wall, neighbours agreeing on
+  the line they hang from, no prism inverting over any scene, reach confined to the hexagon, the cut
+  confined to the rim with the right ramp at every vertex, and the hash stable and spending its whole
+  range. Visually on `sea` and `two-lakes`: closed and stepped from below, prisms of differing length
+  along the rim at a grazing angle, and a pale band darkening with depth under a submerged rim
+  location. The `hide skirt` checkbox is wired like the compass one and, like every control here, has
+  never been clicked — no pointer injection on this machine.

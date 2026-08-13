@@ -1,7 +1,7 @@
 ---
 tags: [index]
 type: index
-updated: 2026-08-12
+updated: 2026-08-13
 ---
 # Home: Index
 
@@ -42,6 +42,8 @@ Two directions of knowledge, deliberately kept apart:
 - [[instrumentation]]: driving and reading the app from a script — naming a camera pose, capturing a
   batch of frames, and dumping scene state as JSON, without disturbing the interactive app.
   `status: implemented`.
+- [[skirt]]: what closes the terrain from below — a hexagonal prism per location, of a deterministic
+  length, and an opaque graduated cut through the water where the grid ends. `status: implemented`.
 - [[water]]: how a water plate is shaded — a ripple field for the sun to glitter on, and shallows
   coloured from the model's own heights rather than the depth buffer. `status: stale` — the plate is
   no longer the seven-vertex fan one constraint pins it to. The shading it owns is unaffected.

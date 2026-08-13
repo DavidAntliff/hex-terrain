@@ -268,6 +268,19 @@ completely, so a mesh built under it can be wound backwards for as long as it st
 and will disappear the moment culling is turned on. A cheap unit test comparing the two per triangle
 catches it without a renderer.
 
+**Vertex colours replace the material's base colour, then multiply back into it, and they are
+linear.** `Mesh::ATTRIBUTE_COLOR` is `Float32x4`. Its presence in the mesh layout is what pushes the
+`VERTEX_COLORS` shader def (`bevy_pbr/src/render/mesh.rs`), after which
+`pbr_input_from_vertex_output` assigns `pbr_input.material.base_color = in.color` and
+`pbr_input_from_standard_material` then does `base_color *= <the material's own>`
+(`bevy_pbr/src/render/pbr_fragment.wgsl`). So the two multiply, and a white `StandardMaterial` lets
+the mesh decide the colour outright. The value is used as-is, with no sRGB conversion — the material
+converts its own colour on the way to the GPU, so `Color::srgb(..).to_linear()` is what a vertex
+colour has to be written as, or it arrives several stops dark.
+
+The attribute is per mesh, not per material: adding it specializes that mesh's pipeline, so a
+builder shared with meshes that carry no colours should insert it only when it has some.
+
 **Scaling a mesh to zero on one axis renders it black.** The normal transform is the inverse
 transpose of the model matrix, which a zero scale makes degenerate, so the shading normals come out
 unusable. Anything that drives a scale component from data will eventually feed it a zero — a height

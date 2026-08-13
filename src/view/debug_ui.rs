@@ -1,9 +1,10 @@
 //! Top-right readout for the selected hex, and the controls that drive the view.
 //!
-//! Four controls: a button cycling the label mode (including off), a button toggling the hexagon
-//! orientation, a checkbox for the compass, and a button that frames the whole scene from
-//! overhead. The state-carrying buttons cycle rather than offering radio lists, because this is a
-//! debug panel and a cycle is one entity and one observer arm.
+//! Five controls: a button cycling the label mode (including off), a button toggling the hexagon
+//! orientation, checkboxes for the compass and for hiding the terrain's skirt, a slider for the sea
+//! level, and a button that frames the whole scene from overhead. The state-carrying buttons cycle
+//! rather than offering radio lists, because this is a debug panel and a cycle is one entity and one
+//! observer arm.
 
 use bevy::prelude::*;
 use bevy::ui::Checked;
@@ -14,7 +15,7 @@ use bevy::ui_widgets::{
 
 use super::compass::ShowCompass;
 use super::framing::ResetViewRequested;
-use super::grid_render::SeaLevel;
+use super::grid_render::{HideSkirt, SeaLevel};
 use super::labels::LabelMode;
 use super::layout::HexLayout;
 use super::selection::Selected;
@@ -37,6 +38,8 @@ const THUMB_WIDTH: f32 = 9.0;
 const EMPTY_READOUT: &str = "click a hexagon";
 /// Fixed, unlike the other captions — this button reports no state.
 const RESET_CAPTION: &str = "reset view";
+const COMPASS_CAPTION: &str = "compass";
+const SKIRT_CAPTION: &str = "hide skirt";
 
 /// The readout text node.
 #[derive(Component)]
@@ -48,6 +51,7 @@ pub enum Control {
     LabelMode,
     Orientation,
     Compass,
+    HideSkirt,
     SeaLevel,
     ResetView,
 }
@@ -61,6 +65,7 @@ pub fn spawn_debug_ui(
     mode: Res<LabelMode>,
     layout: Res<HexLayout>,
     show_compass: Res<ShowCompass>,
+    hide_skirt: Res<HideSkirt>,
     sea: Res<SeaLevel>,
 ) {
     commands
@@ -96,7 +101,8 @@ pub fn spawn_debug_ui(
                 Control::Orientation,
                 orientation_caption(layout.orientation),
             );
-            spawn_checkbox(panel, Control::Compass, show_compass.0, "compass");
+            spawn_checkbox(panel, Control::Compass, show_compass.0, COMPASS_CAPTION);
+            spawn_checkbox(panel, Control::HideSkirt, hide_skirt.0, SKIRT_CAPTION);
             spawn_slider(panel, Control::SeaLevel, sea.0);
             spawn_button(panel, Control::ResetView, RESET_CAPTION.to_string());
         });
@@ -258,9 +264,12 @@ pub fn on_checkbox_changed(
     change: On<ValueChange<bool>>,
     controls: Query<&Control>,
     mut show_compass: ResMut<ShowCompass>,
+    mut hide_skirt: ResMut<HideSkirt>,
 ) {
-    if let Ok(Control::Compass) = controls.get(change.source) {
-        show_compass.0 = change.value;
+    match controls.get(change.source) {
+        Ok(Control::Compass) => show_compass.0 = change.value,
+        Ok(Control::HideSkirt) => hide_skirt.0 = change.value,
+        _ => {}
     }
 }
 
@@ -282,12 +291,14 @@ pub fn update_captions(
     mode: Res<LabelMode>,
     layout: Res<HexLayout>,
     show_compass: Res<ShowCompass>,
+    hide_skirt: Res<HideSkirt>,
     sea: Res<SeaLevel>,
     mut captions: Query<(&ControlCaption, &mut Text)>,
 ) {
     if !mode.is_changed()
         && !layout.is_changed()
         && !show_compass.is_changed()
+        && !hide_skirt.is_changed()
         && !sea.is_changed()
     {
         return;
@@ -296,7 +307,8 @@ pub fn update_captions(
         **text = match caption.0 {
             Control::LabelMode => label_caption(*mode),
             Control::Orientation => orientation_caption(layout.orientation),
-            Control::Compass => checkbox_caption(show_compass.0, "compass"),
+            Control::Compass => checkbox_caption(show_compass.0, COMPASS_CAPTION),
+            Control::HideSkirt => checkbox_caption(hide_skirt.0, SKIRT_CAPTION),
             Control::SeaLevel => sea_level_caption(sea.0),
             Control::ResetView => RESET_CAPTION.to_string(),
         };
