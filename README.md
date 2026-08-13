@@ -103,10 +103,16 @@ at the same time serialise on a lock; see `spec/wiki/build-performance.md`.
 
 ## Web
 
+**Live at [davidantliff.github.io/hex-terrain](https://davidantliff.github.io/hex-terrain/)** — a
+push to `main` rebuilds and redeploys it. It is a ~50 MB wasm download, so give it a moment.
+
     trunk serve --open                      # dev server on 127.0.0.1:8080
 
     trunk build --release                   # static files in dist/
     python3 -m http.server -d dist 8080     # or any static server
+
+The deploy is `.github/workflows/pages.yml`; it adds `--public-url /hex-terrain/`, which the
+subpath needs. See `spec/wiki/build-performance.md` for what that flag fixes.
 
 ## The starfield cubemap
 

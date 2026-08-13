@@ -1,7 +1,7 @@
 ---
 tags: [skybox, assets, tooling, concept]
 type: concept
-updated: 2026-08-12
+updated: 2026-08-13
 ---
 # Skybox pipeline
 
@@ -14,6 +14,10 @@ clone needs neither the tool nor the sources.
 nothing. The tool and its asset are kept, working, for a night mode. The face convention below is
 still the one in use: `src/sky.rs` writes to the same layout deliberately, so the two skies are
 interchangeable. See [[scene]] for the decision.
+
+Because nothing loads it, `index.html` no longer copies it into the web bundle — 10.8 MB against a
+50 MB deploy. Wiring a night mode up therefore means widening that `copy-dir` link as well as
+loading the asset, or it will 404 on the web only. See [[build-performance]] → *Web build*.
 
 ```bash
 python3 tools/make_skybox.py --check            # geometry asserts only, no downloads

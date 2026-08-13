@@ -509,3 +509,22 @@ wheel-for-speed — worked perfectly, and only mouse-look never engaged, that be
 behind an edge rather than a level. Nothing warned. `.after(bevy::input::InputSystems)` is the fix,
 and the general rule — gate a `just_pressed` consumer and you must order against the input, not
 merely against the consumer — is now in [[bevy-0-19-api]].
+
+## [2026-08-13] tooling | the web build publishes itself to GitHub Pages
+
+- `.github/workflows/pages.yml` builds the release wasm on every push to `main` and deploys it as a
+  Pages artefact, live at https://davidantliff.github.io/hex-terrain/. `dist/` stays gitignored —
+  nothing built is committed. Recorded in [[build-performance]] with the two non-obvious parts:
+  `--public-url /hex-terrain/`, without which a subpath site fetches its wasm from the domain root,
+  and `CARGO_BUILD_BUILD_DIR: target`, which keeps CI out of the shared build directory so the cache
+  action still sees the artefacts it caches.
+- `index.html` now copies `assets/shaders` rather than all of `assets/`, which stops shipping the
+  11 MB starmap cubemap that [[skybox-pipeline]] records as unwired. `data-target-path` preserves the
+  runtime path. The deployed bundle went ~63 MB → ~50 MB with no change to the wasm.
+- Release wasm size still has had no attention. `data-wasm-opt="z"` is the cheapest lever and is
+  release-only, so it costs dev builds nothing; the workflow prints the bundle sizes into the run
+  summary so the decision can be made against numbers.
+- Verified: built locally with `--public-url /hex-terrain/`, served from that subpath, and loaded in
+  Chrome — the scene renders, `water.wgsl` returns 200, and only the expected WebGL2 downlevel
+  warnings appear. `trunk serve` was **not** re-run; the change alters where trunk writes the asset,
+  not how, and the release build exercises the same pipeline.

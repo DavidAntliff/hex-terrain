@@ -1,0 +1,55 @@
+name: Deploy web build to Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a newer push supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # `.cargo/config.toml` shares one build directory between local worktrees. In CI there is
+      # only one checkout, and the cache action expects `./target`.
+      CARGO_BUILD_BUILD_DIR: target
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      # A pinned release tarball: `cargo install trunk` costs minutes, and the tarball holds a bare
+      # `trunk` binary. ~/.cargo/bin is on PATH and writable, unlike /usr/local/bin.
+      - name: Install trunk
+        run: |
+          curl -fsSL https://github.com/trunk-rs/trunk/releases/download/v0.21.14/trunk-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C "$HOME/.cargo/bin" trunk
+      # The generated index.html references the wasm and JS by absolute path, so a project site
+      # served from a subpath needs that subpath baked in. Bevy's asset fetches are relative and
+      # need nothing.
+      - run: trunk build --release --public-url /hex-terrain/
+      - name: Report bundle size
+        run: du -ah dist | sort -h | tail -20 >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

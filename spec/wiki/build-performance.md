@@ -58,26 +58,59 @@ covers dependencies, so this is a cheap experiment to repeat.
 
 ## Web build
 
-`trunk` builds, bundles `assets/`, and downloads the wasm-bindgen version matching Bevy
+`trunk` builds, bundles the assets, and downloads the wasm-bindgen version matching Bevy
 (0.2.127 for Bevy 0.19), which removes the classic version-mismatch failure. `index.html`
-declares `rel="rust"` and `rel="copy-dir" href="assets"`.
+declares `rel="rust"` and copies **`assets/shaders` only**, via
+`rel="copy-dir" href="assets/shaders" data-target-path="assets/shaders"`. The whole of `assets/`
+used to be copied, which shipped the 11 MB starmap cubemap that [[skybox-pipeline]] records as
+unwired — `data-target-path` is what keeps the runtime path `shaders/water.wgsl` intact once the
+`href` is no longer the asset root. Widen it again the day a second asset is loaded.
 
 Output sizes, both untuned:
 
 | Build | wasm | assets |
 |---|---|---|
-| debug | 100 MB | 11 MB |
-| release | 52 MB | 11 MB |
+| debug | 100 MB | 5 KB |
+| release | 52 MB | 5 KB |
 
 Debug wasm is too large to be practical over HTTP; use `--release` for anything but a local
 smoke test. Release wasm size has had no attention — `opt-level = "s"`, LTO, and `wasm-opt`
-are the obvious levers if it starts to matter.
+are the obvious levers if it starts to matter. `wasm-opt` is the cheapest to try:
+`data-wasm-opt="z"` on the `rel="rust"` link, which trunk fetches itself and **only applies in
+`--release`**, so dev builds are unaffected.
 
 The release figure is `dist/*_bg.wasm` after `trunk build --release`, measured at 52,336,672 bytes
 once `serde`/`serde_json` had been added for [[instrumentation]]'s report. It was 51 MB before, but
 **no controlled before/after was run** — other changes landed between the two measurements, so the
 serde contribution is not separated out. It is at most about a megabyte against a 52 MB baseline,
 which is why it was not worth measuring properly.
+
+Re-measured after the assets narrowing, on 2026-08-13: `dist/*_bg.wasm` is 52,367,266 bytes and
+`dist/assets/shaders/water.wgsl` is 5,161 bytes, so the deployed bundle went from ~63 MB to ~50 MB
+without touching the wasm.
+
+### Deploying to GitHub Pages
+
+`.github/workflows/pages.yml` builds on every push to `main` and deploys the result as a Pages
+artefact; `dist/` stays gitignored and nothing built is ever committed. Two things about it are
+not obvious:
+
+- **`--public-url /hex-terrain/` is required.** The `index.html` trunk generates references the JS
+  and wasm by *absolute* path, so without it a project site under `/hex-terrain/` fetches
+  `/hex-terrain-<hash>.js` from the domain root and gets nothing. Bevy's own asset fetches are
+  relative and need no help. This is invisible when testing locally at a domain root — serve the
+  build under the subpath if the flag is ever in question.
+- **`CARGO_BUILD_BUILD_DIR: target` overrides `.cargo/config.toml`.** The shared build directory
+  exists for local worktrees; in CI there is one checkout and `Swatinem/rust-cache` caches
+  `./target`, so pointing the build elsewhere would silently defeat the cache.
+
+The workflow installs a pinned trunk release tarball rather than `cargo install trunk` (minutes) or
+a third-party action. Trunk then fetches its own matching wasm-bindgen, so nothing else is needed.
+
+Verified on 2026-08-13 before the first deploy: the release build served from a `/hex-terrain/`
+subpath renders, fetches `assets/shaders/water.wgsl` (200), and logs only the expected WebGL2
+downlevel warnings (no OIT, no background motion vectors, no SSAO, no atmosphere — see
+[[bevy-0-19-api]]). Bevy also probes `water.wgsl.meta` and takes a 404; that is normal and harmless.
 
 ## Shared build directory — adopted
 
