@@ -155,3 +155,165 @@ Append-only, newest at the bottom. Keep the prefix consistent so it stays greppa
 - Outlines float just clear of what they trace, by more than the water's own lift, which also covers
   a location standing exactly at the water line: flooding is strict so the model calls it dry, but a
   neighbour's surface still covers it.
+
+## [2026-08-13] feature | a daylight sky, and water that reflects it
+
+- The water read as painted blue, and [[terrain]] had already named the cause: a smooth plane with
+  no environment map has nothing to reflect. So the fix started upstream of any shader — the
+  starfield was replaced by a generated **daylight sky** (`src/sky.rs`), and an
+  `EnvironmentMapLight` taken from the same model now lights the scene.
+- The sky is **Preetham's analytic daylight model**, evaluated on the CPU into a 256² cubemap at
+  startup. No asset, no download, no generator to run: unlike the starfield, an analytic sky has no
+  source imagery. Below the horizon, ground **hazes** into the sky's own colour at the same azimuth
+  over several degrees — aerial perspective, so the horizon has no line in it. Recorded in [[scene]].
+- **Everything is in physical units now**: `lux::DIRECT_SUNLIGHT`, sky luminance in cd/m²,
+  `Exposure::SUNLIGHT` on the camera, and `brightness`/`intensity` both 1.0. The ambient fill went
+  to zero — the environment map does that job with the colours actually overhead.
+- **A black sky is not a broken skybox.** An hour went on this: the sky rendered pure black while
+  the terrain lit correctly. The cubemap data was right, the pipeline was right, and a uniform red
+  test texture rendered fine — which proved nothing, because a uniform texture looks correct however
+  it is sampled. The camera was looking *down*, so the whole frame was ground, and the ground
+  colour had been put through the cd/m² scale as though it were a luminance: dark grey became
+  5e-6. `Sky::ground` is now a **fraction of the horizon's brightness**, which cannot go wrong that
+  way, and a test pins the ratio.
+- `patch_cubemap` **deleted**. An `Image` built in code sets its own cube view descriptor, so there
+  is no load state to poll and no re-upload guard — `src/main.rs` came out shorter than it went in.
+- Water gained an `ExtendedMaterial` shader ([[water]]): six ripple trains at golden-angle
+  directions travelling at their real dispersion speeds, so the pattern never settles into the plaid
+  four even waves produced; ripples fading with distance into roughness, because sub-pixel ripples
+  are crawling shimmer; and a shoaling colour.
+- **Water depth comes from the model, not the depth buffer** — WebGL2 cannot sample one. A plate's
+  seven vertices are the points `wall_mesh` already places terrain at, so `corner_height` gives the
+  ground under each, and at a shoreline the corner mean *is* the terrain's wedge height: the depth
+  there is exactly zero and the shallows meet the shoreline with nothing lined up by hand. It rides
+  in `uv.x`, a channel an untextured standard material ignores.
+- SSR, procedural `Atmosphere` and runtime-generated environment maps were all considered and all
+  fail WebGL2 — two on compute, two on a Naga bug sampling depth textures. Recorded in
+  [[bevy-0-19-api]] so nobody prices them again.
+- Verified: 61 tests pass, screenshots at two pitches and two sea levels, and the wasm build
+  rendering in Firefox — the check the whole design is shaped around. `WGPU_BACKEND=gl` would have
+  been a cheap native proxy for it but no GL adapter was available, NVIDIA or Mesa.
+
+## [2026-08-13] feature | named scenes, and a bridge between two water levels
+
+- **Scenes are a named table**, `src/hex/scenes.rs`: `(name, fn() -> TerrainGrid)`, picked by
+  `cargo run -- <name>`, defaulting to `sea` — the sandbox, unchanged. Model data, so a scene is a
+  whole grid including its water and nothing about how any of it is drawn. `GRID_RADIUS` moved out of
+  `view` on the way past: a grid's extent is dimensionless. Parsing is `std::env::args().nth(1)`
+  against the table, called before `App::new()` so a mistyped name costs a message rather than a GPU
+  init. See [[scene]] for why not a CLI crate and not an environment variable.
+- **A test must never read `argv`.** Under `cargo test` the first argument is the test-name filter, so
+  a test calling the scene picker exits the harness on `cargo test some_filter`. The main-binary test
+  goes through `scenes::build(scenes::DEFAULT)` instead.
+- **`apply_sea_level` was erasing scene-authored water before it was ever drawn.** Inserting a
+  resource counts as changing it, so `Res<SeaLevel>::is_changed()` is true on the first `Update` and
+  the startup flood overwrote every hand-authored level. Guarded with `|| sea.is_added()`. Anything
+  that writes the model from a resource's change detection has the same hazard.
+- **The `two-lakes` scene, and what it shows.** Two bodies at 0.55 and 0.0 either side of a land
+  bridge one hex wide (the axial line `q = 0`, whose `q = -1` and `q = +1` neighbours are never
+  adjacent to each other), with the bridge's ground at 0.95 — above both, so neither body can drain
+  into the other and the data is sensible by [[terrain]]'s own rule.
+  - The reassuring half: `water_levels` returns **both** levels for the bridge, and `sync_water`
+    spawns a plate for each. The renderer does not pick one.
+  - The artefact: a plate covers the location's *whole* hexagon, and a bridge cell's wall dips to the
+    **mean** of the two heights either side — `mean(0.95, -0.6) = 0.175` at the edges, `0.433` at the
+    corners, both under 0.55. So the higher plate is exposed all the way round each bridge cap,
+    including the flank facing the *lower* body, where it stands 0.55 above it. The lower body's own
+    cells never see the higher level, so it ends at the hexagon boundary in a wall of water — 0.825
+    world units at `HEIGHT_SCALE` 1.5, against a hexagon circumradius of 1.
+  - On screen the bridge reads as a chain of islands standing in the higher water, with the lower
+    water visibly below it in the same frame.
+  - This contradicts [[terrain]]'s claim that a step needs "ground between them below both", so "the
+    data has to be sensible rather than the renderer policing it". Ground above both levels is not
+    sufficient, because the *wall* between two caps is not ground above both. Reconciling that spec
+    is pending.
+- Verified: 64 tests, including one recording the artefact numerically so confirming it does not rest
+  on pixels, and screenshots at four camera angles. The camera default was edited to reach a
+  low-pitch view and restored — the shell has no way to aim it from outside.
+
+## [2026-08-13] fix | a water level reaches only the part of a location its own body touches
+
+The artefact above, fixed in the renderer alone — the model still holds one level per location and
+nothing else. `water_levels` is replaced by `water_plates`, returning each level with the **pieces**
+of the hexagon it covers, and two rules decide them:
+
+- **Reach.** A location's hexagon divides into six sectors, one per edge, and each sector halves at
+  the midpoint of that edge. A location's own water covers all twelve halves; a neighbour's covers the
+  two along their shared edge and the one in each adjoining sector that reaches a shared corner. A
+  body can no longer cross a location and come out over another body's shore.
+- **Submergence.** A piece is dropped when every height under it stands above the level, since a
+  buried plate draws nothing. Those heights are the cap, the bridge along the edge, and the piece's
+  one corner; the terrain between them is planar, so nothing lower hides in between.
+
+Why the **half**-sector and not the sector: a half touches exactly two neighbours — the one across its
+edge and the one sharing its corner — so it can only be claimed by two bodies at once if those two
+bodies are adjacent, and two bodies at different levels never are, or one would drain into the other.
+A whole sector touches three, which leaves the ambiguity in place. Twelve pieces is therefore not a
+finer approximation, it is the granularity at which the problem disappears for any sensible terrain.
+
+Details worth keeping:
+
+- **The edge midpoint pays for itself twice.** It is what halves a sector, and it puts a vertex over
+  the *bridge*. The old chord ran corner to corner and interpolated between two corner means, missing
+  the bridge underneath at a different height — so the shallows along an edge were shaded from a depth
+  the water did not have there. Depths are now exact at every vertex again.
+- **Both bodies can legitimately reach the same bridge, on disjoint pieces.** A wall along an edge is
+  the mean of two heights, but a corner is the mean of three, so where a bridge meets *two* cells of
+  the lower body that corner falls to `mean(0.95, -0.6, -0.6) = -0.08` — under the lower level, and so
+  genuinely its shore. A first attempt at the test asserted only one body reaches the bridge and was
+  wrong, not the code.
+- The `terraces` scene exists for that case: three levels over two bridges, the second low enough that
+  the bodies either side both reach it and each is confined to its own half of the cell. Where they
+  meet is a step no rendering rule can remove — only place correctly.
+- Verified: 66 tests, including one over every registered scene asserting that no location ever draws
+  two levels over the same piece — which is the artefact in its general form. Screenshots A/B at three
+  camera angles, with the old rule temporarily restored to shoot the same frames: the higher water is
+  gone from the bridge's lower flank, the bridge no longer reads as islands standing in the upper body,
+  and in `sea` several plates that hung past the grid's boundary lip disappeared with no shoreline
+  opening up anywhere.
+
+Divergences this opens, both pending reconciliation: [[terrain]]'s one-ring rule is still true but is
+now stated too coarsely — the reach is per half-sector, not per hexagon — and its remark that "the data
+has to be sensible rather than the renderer policing it" no longer describes what the renderer does.
+[[water]]'s constraint that "the plate is a seven-vertex fan and stays one" is violated by the six edge
+midpoints, though its *reason* — do not subdivide to displace a surface for waves — still holds.
+
+## [2026-08-13] note | the pale stripe across `sea` is the shoreline, not an artefact
+
+Raised as a suspected bug and it is not one. `undulating` is `0.5 * (sin(0.9q) + sin(0.9r))`, so on the
+diagonal `q + r = 0` the two terms cancel: the seven locations from `(3,-3)` to `(-3,3)` are at a
+**bitwise** zero, not merely near it — `sin` is odd and `r = -q` negates its argument exactly. A test in
+`hex::tests` now pins that, because ground exactly at a water level is the renderer's awkward case and
+this generator hands it over seven times in the default scene.
+
+The stripe is therefore the *shoreline* of the default scene, and it is straight because the
+generator's zero contour is straight. It looks like a band rather than a line for a second reason worth
+knowing: `shallow_depth` is 0.55, so the pale-to-deep ramp spans the first 0.55 of depth, which on this
+terrain is about two hexes either side of the contour. Draining the scene entirely (`flood` to -2.0)
+removes the stripe, which is what proved it was water rather than a lighting or shadow seam.
+
+Submergence now also tests `floor < level` rather than `floor <= level`, matching the strictness of
+`flood`: a piece whose *lowest* ground is exactly at the level has nothing under it to cover. An `AE`
+pixel diff of the same frame before and after shows that removes two small wedges and nothing else, so
+it was not the explanation on its own.
+
+**The explanation was the direction of the epsilon.** A piece is drawn when its *edge* is submerged,
+and it reaches inward from that edge to the location's centre — so on a location lying exactly at the
+water level, six of its twelve pieces are drawn and every one of them covers a cap at exactly the
+level. `WATER_LIFT` put the plate 0.002 *above* it, winning the tie, so half of each of those seven
+locations was covered in zero-depth water, which is the palest the shoaling colour goes. A probe
+printing `water_plates` for the diagonal showed it: `(0,0)` is `height=0.0 water=None` and draws
+pieces 3-8, every one with `cap=0.0`.
+
+The constant is now `WATER_TIE_BREAK` and the plate sits `level - WATER_TIE_BREAK`, giving the tie to
+the **ground**: land level with the water reads as land. Both directions stop the z-fighting the
+epsilon exists for; only one of them is right, which is now recorded in [[bevy-0-19-api]]. The outline
+clearance keeps its old sign — it wants to be above everything, and the plate it competes with has
+moved further below it. Verified by a pixel diff of the two directions in the same frame at a pinned
+window size: the change is confined to the wedges over that diagonal.
+
+Two smaller things learned in passing. `WindowResolution` has no `From<(f32, f32)>`, only integer
+forms — worth pinning a size for any screenshot A/B, since otherwise a tiling window manager hands out
+different geometry per run and the diff is meaningless. And the ripple animation makes two runs differ
+by a speckle everywhere there is water, so an `AE` count is a floor on the real difference, not the
+difference itself.

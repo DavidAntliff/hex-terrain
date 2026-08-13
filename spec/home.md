@@ -36,8 +36,10 @@ Two directions of knowledge, deliberately kept apart:
 - [[terrain]]: elevation as per-location data, drawn as a continuous surface — a level cap per
   location, joined to its neighbours by inclined walls — with picking and shadows.
   `status: implemented`.
-- [[scene]]: the scene shell — starfield skybox, orbit camera, clean exit, native and web build
-  paths. `status: implemented`.
+- [[scene]]: the scene shell — a generated daylight sky that also lights the grid, orbit camera,
+  clean exit, native and web build paths. `status: implemented`.
+- [[water]]: how a water plate is shaded — a ripple field for the sun to glitter on, and shallows
+  coloured from the model's own heights rather than the depth buffer. `status: implemented`.
 
 ## Wiki
 
@@ -49,7 +51,7 @@ Two directions of knowledge, deliberately kept apart:
 - [[build-performance]]: what makes this project slow to build and what was measured to fix it
   — dynamic linking, the LLD result, the `kache` wrapper, wasm output sizes.
 - [[skybox-pipeline]]: how `tools/make_skybox.py` turns NASA all-sky EXRs into a cubemap, the
-  exposure knob, and the traps in the ImageMagick and projection steps.
+  exposure knob, and the traps in the ImageMagick and projection steps. No longer the scene's sky.
 - [[log]]: append-only record.
 
 ## 🌱 Stubs

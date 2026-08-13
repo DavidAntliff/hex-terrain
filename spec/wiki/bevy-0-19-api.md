@@ -50,9 +50,80 @@ image.texture_view_descriptor = Some(TextureViewDescriptor {
 });
 ```
 
-The skybox does **not** light the scene; `EnvironmentMapLight` is a separate component
-requiring a prefiltered map. A KTX2 cubemap carries the metadata natively and would remove the
-reinterpretation code entirely, at the cost of needing `toktx`/`basisu` to generate.
+The skybox does **not** light the scene; `EnvironmentMapLight` is a separate component.
+
+**A cubemap built in code needs none of the reinterpretation above.** Construct the `Image` with
+six array layers and set `texture_view_descriptor` at construction, and there is no load state to
+poll, no re-upload guard, and no bind-group nudge — the whole `patch_cubemap` idiom disappears.
+`Rgba16Float` is the format to reach for: it is what Bevy's own `hemispherical_gradient_cubemap`
+uses, and the one HDR format WebGL2 filters without an extension.
+
+Bevy will silently draw **no** skybox rather than fail if the image is missing from
+`RenderAssets<GpuImage>`. It warns only about a wrong view dimension
+(`sanity_check_skybox_image_and_warn`), so a black sky is not evidence of a broken cubemap — check
+what the texels actually contain before suspecting the pipeline. A **uniform** debug texture cannot
+distinguish a pipeline fault from a sampling one, since it looks correct however it is sampled.
+
+## Environment maps need no KTX2
+
+`EnvironmentMapLight` lives in `bevy_light`, and 0.19 ships two constructors that build the map on
+the CPU — so the `toktx`/`basisu` prefiltering step is **not** required to light a scene from a sky:
+
+```rust
+EnvironmentMapLight::solid_color(&mut images, color)
+EnvironmentMapLight::hemispherical_gradient(&mut images, top, mid, bottom)
+```
+
+The gradient is a **1×1×6** cubemap — ideal as an environment map, and visibly faceted if used as a
+skybox, so it is not a substitute for one.
+
+`GeneratedEnvironmentMapLight` and `AtmosphereEnvironmentMapLight` will filter an arbitrary cubemap
+at runtime, which is the better-looking answer — but both go through
+`EnvironmentMapGenerationPlugin`, which **disables itself where compute is unavailable**
+(`light_probe/generate.rs`, logging "Disabling EnvironmentMapGenerationPlugin because compute is
+not supported on this platform"). That means not on WebGL2.
+
+## What WebGL2 rules out
+
+Verified against the 0.19 source, because each of these looks available until it isn't:
+
+- **Screen-space reflections.** `ScreenSpaceReflections` exists in `bevy_pbr::ssr` and
+  `examples/3d/ssr.rs` is a water demo, but the component's own doc says: *"Screen-space reflections
+  are presently unsupported on WebGL 2 because of a bug whereby Naga doesn't generate correct GLSL
+  when sampling depth buffers."* It also requires deferred rendering, which forfeits
+  `specular_tint` and `diffuse_transmission`.
+- **Sampling the depth prepass texture** at all, for the same Naga reason.
+- **Procedural `Atmosphere`.** `bevy_pbr/src/atmosphere/` builds its LUTs with compute pipelines.
+  `AtmosphereSettings` also `#[require(Hdr)]`.
+- **Runtime-generated environment maps**, per the section above.
+
+There is no `ScreenSpaceReflectionsBundle` in 0.19 — bundles were replaced by required components.
+
+## Material extensions
+
+`ExtendedMaterial<B, E>` and `MaterialExtension` are in `bevy::pbr` but **not in its prelude**.
+`ShaderRef` moved with the 0.19 crate split and is now `bevy::shader::ShaderRef`, not in
+`bevy_render::render_resource`.
+
+- Bindings **start at 100**; 0-99 belong to the base material.
+- Every shader entry point defaults to the base material's, so an extension can override
+  `fragment_shader()` alone and inherit the prepass and deferred paths.
+- `opaque_render_method()` and `reads_view_transmission_texture()` come from the **base only** — an
+  extension cannot opt into transmission.
+- The reference to copy is `examples/shader/extended_material.rs`; `examples/3d/ssr.rs` is the same
+  pattern applied to water.
+
+A mesh attribute the base material ignores is a free channel to the fragment shader: an untextured
+`StandardMaterial` never reads `uv`, and `VertexOutput` carries it whenever the mesh has `UV_0`, so
+a per-vertex scalar needs no custom attribute and no `specialize()` override.
+
+## Exposure and photometric units
+
+`Exposure` defaults to `EV100_BLENDER` (9.7), several stops darker than daylight. `Exposure::SUNLIGHT`
+is `ev100: 15.0`, and `bevy::light::light_consts::lux` names the matching illuminances —
+`DIRECT_SUNLIGHT` is 100 000, an order of magnitude above `AMBIENT_DAYLIGHT`. With those two set
+together, `Skybox::brightness` and `EnvironmentMapLight::intensity` are both `1.0` for a sky
+expressed in cd/m², and no level needs tuning against another.
 
 ## Mouse input
 
@@ -134,6 +205,20 @@ the fix has to be geometric: separate them by an epsilon. Gizmos are the excepti
 `depth_bias` is a real depth offset, which is why the grid outlines can be biased over the faces
 they trace.
 
+**Which way the epsilon points is a decision, not a detail.** Whichever mesh is nudged towards the
+camera wins every exact tie. Water separated from terrain by lifting the *water* makes ground lying
+exactly at its own water level read as submerged, which is not a rounding artefact but a visible
+patch of zero-depth water over dry land. Nudging the water *down* instead gives the tie to the
+ground. Either separation stops the z-fighting; only one of them is right.
+
+## `WindowResolution` takes integers
+
+`Window { resolution: (1600.0, 900.0).into(), .. }` does not compile. The `From` impls are
+`(u32, u32)`, `[u32; 2]` and `UVec2` (`bevy_window/src/window.rs`) — logical pixels are integral
+here. Write `(1600u32, 900u32).into()`. Worth knowing when pinning a size to make two screenshots
+pixel-comparable: without it a tiling window manager hands out whatever geometry it likes and an
+image diff between two runs is meaningless.
+
 ## Mesh primitives
 
 `Extrusion<T: Primitive2d>` exists and `Extrusion<RegularPolygon>` is `Meshable` and `Into<Mesh>`
@@ -192,4 +277,5 @@ world-space picking code — see `Hovered` below.
 ## Related
 
 - [[scene]]: the spec whose implementation depends on all of the above
+- [[water]]: the spec the WebGL2 exclusions above shaped
 - [[build-performance]]: build-time consequences of depending on Bevy

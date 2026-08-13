@@ -1,19 +1,25 @@
-//! A hex grid to iterate terrain work in: a side-4 hexagon of locations under a starfield, with an
-//! orbit camera, click selection and coordinate labels.
+//! A hex grid to iterate terrain work in: a side-4 hexagon of locations under a daylight sky, with
+//! an orbit camera, click selection and coordinate labels.
 
 use bevy::{
-    light::{CascadeShadowConfig, CascadeShadowConfigBuilder, Skybox},
+    camera::Exposure,
+    light::{
+        light_consts::lux, CascadeShadowConfig, CascadeShadowConfigBuilder, EnvironmentMapLight,
+        Skybox,
+    },
     prelude::*,
-    render::render_resource::{TextureViewDescriptor, TextureViewDimension},
 };
 
 use hex_terrain::camera::{self, place, Orbit};
-use hex_terrain::hex::{undulating, TerrainGrid};
+use hex_terrain::hex::{scenes, TerrainGrid};
 use hex_terrain::screenshot::ScreenshotOnDemandPlugin;
-use hex_terrain::view::{GridModel, HexLayout, HexViewPlugin, GRID_RADIUS};
+use hex_terrain::sky::Sky;
+use hex_terrain::view::{GridModel, HexLayout, HexViewPlugin};
 
-/// Vertical 1x6 strip, wgpu face order: +X -X +Y -Y +Z -Z. See `tools/make_skybox.py`.
-const CUBEMAP: &str = "textures/starmap_cubemap.png";
+/// Direction towards the sun, shared by the light and the sky so the highlight the water throws
+/// and the sun it is supposedly reflecting cannot drift apart. About 55° up: a midday sun at
+/// middle latitudes.
+const SUN_DIR: Vec3 = Vec3::new(4.0, 8.0, 4.0);
 
 /// Hexagon circumradius in world units. The in-plane scaling knob for the whole grid.
 const HEX_SCALE: f32 = 1.0;
@@ -22,6 +28,9 @@ const HEX_SCALE: f32 = 1.0;
 const HEIGHT_SCALE: f32 = 1.5;
 
 fn main() {
+    // Before the app, so an unknown scene name costs nothing but the message.
+    let grid = named_scene();
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -33,16 +42,33 @@ fn main() {
         }))
         .add_plugins((HexViewPlugin, ScreenshotOnDemandPlugin))
         .insert_resource(HexLayout::pointy(HEX_SCALE).with_height_scale(HEIGHT_SCALE))
-        .insert_resource(GridModel(TerrainGrid::hexagon(GRID_RADIUS, undulating)))
+        .insert_resource(GridModel(grid))
         .add_systems(Startup, setup)
-        .add_systems(Update, (patch_cubemap, camera::orbit, exit_on_escape))
+        .add_systems(Update, (camera::orbit, exit_on_escape))
         .run();
 }
 
-fn setup(mut commands: Commands, assets: Res<AssetServer>) {
+/// The scene named as the first argument, or [`scenes::DEFAULT`].
+///
+/// Hand-rolled rather than parsed: one positional name is the whole interface, and `bevy` is the only
+/// dependency. On web there is no argv, so the default is all that is reachable there.
+fn named_scene() -> TerrainGrid {
+    let arg = std::env::args().nth(1);
+    let name = arg.as_deref().unwrap_or(scenes::DEFAULT);
+    scenes::build(name).unwrap_or_else(|| {
+        let names: Vec<&str> = scenes::names().collect();
+        eprintln!("unknown scene {name:?}; one of: {}", names.join(", "));
+        std::process::exit(2);
+    })
+}
+
+fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     commands.spawn((
         DirectionalLight {
-            illuminance: 10_000.0,
+            // A real midday sun, to go with a sky in real photometric units and a camera exposed
+            // for daylight. Every level in the scene is now a physical quantity rather than a
+            // number tuned against the one next to it.
+            illuminance: lux::DIRECT_SUNLIGHT,
             // 0.19 spells it `shadow_maps_enabled`, not `shadows_enabled`.
             shadow_maps_enabled: true,
             ..default()
@@ -55,14 +81,20 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
             maximum_distance: 60.0,
             ..default()
         }),
-        Transform::from_xyz(4.0, 8.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_translation(SUN_DIR).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Fill light, so shadowed walls and the insides of pits stay readable instead of going black.
-    // The skybox contributes nothing, so without this there is only the one directional light.
+    let sky = Sky {
+        sun: SUN_DIR.normalize(),
+        ..default()
+    };
+    let (zenith, horizon, ground) = sky.gradient_colours();
+
+    // No ambient fill. The environment map below now lights what the sun does not, using the
+    // colours actually overhead instead of one flat tint — a flat fill on top of it would only
+    // wash that shading back out.
     commands.insert_resource(GlobalAmbientLight {
-        color: Color::srgb_u8(180, 190, 220),
-        brightness: 900.0,
+        brightness: 0.0,
         ..default()
     });
 
@@ -70,12 +102,22 @@ fn setup(mut commands: Commands, assets: Res<AssetServer>) {
     commands.spawn((
         Camera3d::default(),
         place(&orbit),
-        // ponytail: the skybox is decoration only, it does not light the grid. For that add
-        // EnvironmentMapLight, which needs a prefiltered KTX2 map (toktx/basisu).
+        // Exposed for daylight rather than Bevy's default, which is set several stops darker for
+        // an interior. With the sun, sky and camera all on physical scales, `brightness` and
+        // `intensity` below are plain 1.0: the sky is handed over in the units they already want.
+        Exposure::SUNLIGHT,
         Skybox {
-            image: Some(assets.load(CUBEMAP)),
-            brightness: 1000.0,
+            image: Some(images.add(sky.cubemap())),
+            brightness: 1.0,
             ..default()
+        },
+        // What the water reflects, and what fills the shadows. Three colours off the same model the
+        // skybox is drawn from, so the reflection agrees with the sky behind it by construction —
+        // and a hemispherical gradient needs no prefiltered KTX2 map, so there is no asset pipeline
+        // behind any of this.
+        EnvironmentMapLight {
+            intensity: 1.0,
+            ..EnvironmentMapLight::hemispherical_gradient(&mut images, zenith, horizon, ground)
         },
         orbit,
     ));
@@ -87,39 +129,6 @@ fn exit_on_escape(keys: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppEx
     if keys.just_pressed(KeyCode::Escape) {
         exit.write(AppExit::Success);
     }
-}
-
-/// A PNG carries no cubemap metadata, so reinterpret the loaded strip as 6 array layers.
-fn patch_cubemap(
-    assets: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
-    mut skybox: Single<&mut Skybox>,
-) {
-    let Some(handle) = skybox.image.clone() else {
-        return;
-    };
-    if !assets.load_state(&handle).is_loaded() {
-        return;
-    }
-    // Peek immutably first: `get_mut` flags the asset modified, which would re-upload the
-    // texture every frame. An already-reinterpreted image has 6 layers, so this is idempotent.
-    if images
-        .get(&handle)
-        .is_none_or(|image| image.texture_descriptor.array_layer_count() != 1)
-    {
-        return;
-    }
-
-    let mut image = images.get_mut(&handle).unwrap();
-    let layers = image.height() / image.width();
-    image
-        .reinterpret_stacked_2d_as_array(layers)
-        .expect("cubemap must be a vertical strip of square faces");
-    image.texture_view_descriptor = Some(TextureViewDescriptor {
-        dimension: Some(TextureViewDimension::Cube),
-        ..default()
-    });
-    skybox.image = Some(handle); // nudge the render world into rebuilding its bind group
 }
 
 #[cfg(test)]
@@ -145,10 +154,13 @@ mod tests {
         assert_eq!(app.should_exit(), Some(AppExit::Success));
     }
 
-    /// The grid the app actually builds is the one the spec describes.
+    /// The grid the app builds with no scene named is the one the spec describes.
+    ///
+    /// Built through `scenes` rather than through `named_scene`, which reads `argv` — under
+    /// `cargo test` the first argument is the test-name filter, not a scene.
     #[test]
-    fn the_scene_grid_is_a_hexagon_of_side_four() {
-        let grid = TerrainGrid::hexagon(GRID_RADIUS, undulating);
+    fn the_default_scene_grid_is_a_hexagon_of_side_four() {
+        let grid = scenes::build(scenes::DEFAULT).expect("the default names a scene");
         assert_eq!(grid.len(), 37);
         assert!(grid.contains(Axial::ZERO));
     }

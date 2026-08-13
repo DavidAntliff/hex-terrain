@@ -19,9 +19,6 @@ pub use layout::HexLayout;
 
 use crate::hex::TerrainGrid;
 
-/// Hexagon rings around the centre. Radius 3 is a hexagon of side 4: 37 locations.
-pub const GRID_RADIUS: i32 = 3;
-
 /// The grid model as a Bevy resource.
 ///
 /// The bridge between the two layers, and the reason it exists: [`crate::hex::Grid`] deliberately
@@ -35,7 +32,8 @@ pub struct HexViewPlugin;
 
 impl Plugin for HexViewPlugin {
     fn build(&self, app: &mut App) {
-        app.init_gizmo_group::<grid_render::GridLines>()
+        app.add_plugins(MaterialPlugin::<grid_render::WaterMaterial>::default())
+            .init_gizmo_group::<grid_render::GridLines>()
             .init_gizmo_group::<grid_render::Highlight>()
             .init_gizmo_group::<compass::CompassLines>()
             .init_resource::<selection::Selected>()

@@ -2,7 +2,7 @@
 tags: [terrain, elevation, spec]
 type: spec
 status: implemented
-updated: 2026-08-12
+updated: 2026-08-13
 ---
 # Spec: Terrain height
 
@@ -283,10 +283,10 @@ Deliberate omissions:
   a raised rim cell shows sky beneath it at a low angle.
 - One inset for the whole grid, not per location; and no per-height colouring or height in the debug
   readout — the readout's world position is still the hex centre on the plane, not the cap.
-- **Water is a flat glossy plate and nothing more.** It reads as painted blue rather than as water,
-  because a smooth plane under one directional light with no environment map has nothing to reflect.
-  Static ripple normals over a subdivided plate would be the cheapest improvement; an
-  `EnvironmentMapLight` would be the largest, and needs the prefiltered map [[scene]] already wants.
+- **How a water plate is *shaded* is no longer specified here** — see [[water]], which covers the
+  ripple field, the shoaling colour, and the per-vertex depth the renderer computes for it. What
+  this spec owns is unchanged: the plate's geometry, the one-ring rule, and the shoreline cut by the
+  depth buffer. That last one is why [[water]] cannot make the plate transparent.
 - Nothing stops two adjacent locations carrying different water levels with ground between them
   below both, which would render as a step in the water. Real bodies at different levels are
   separated by ground above them both, so the data has to be sensible rather than the renderer
@@ -302,4 +302,5 @@ Deliberate omissions:
 - [[hex-grid]]: the grid, the projection and the view this extends
 - [[hex-coordinates]]: the corner↔direction relationship the walls are built on
 - [[bevy-0-19-api]]: the shadow, gizmo and primitive facts this depends on
+- [[water]]: how the water plates this spec places are shaded
 - [[scene]]: the shell it is displayed in, and the lighting it adds to

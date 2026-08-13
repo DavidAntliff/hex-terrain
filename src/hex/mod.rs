@@ -10,6 +10,7 @@
 pub mod coords;
 pub mod grid;
 pub mod orientation;
+pub mod scenes;
 
 pub use coords::{Axial, Cube, Doubled, FractionalCube, DIRECTIONS};
 pub use grid::{Grid, Location};
@@ -83,6 +84,15 @@ mod tests {
         // Both signs, or there would be no troughs to fill.
         assert!(heights.iter().any(|&h| h > 0.1), "no peaks: {heights:?}");
         assert!(heights.iter().any(|&h| h < -0.1), "no troughs: {heights:?}");
+
+        // And a whole diagonal at *exactly* the plane. `sin` is odd and `r = -q` negates its
+        // argument bit for bit, so the two terms cancel to a true zero rather than to something
+        // near it. Worth pinning: ground exactly at a water level is the awkward case for the
+        // renderer, and this generator hands it seven locations of it every time.
+        for q in -3..=3 {
+            let height = undulating(Axial::new(q, -q)).height;
+            assert_eq!(height.to_bits(), 0.0f32.to_bits(), "q={q} is not exactly zero");
+        }
     }
 
     #[test]

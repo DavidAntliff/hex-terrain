@@ -5,9 +5,15 @@ updated: 2026-08-12
 ---
 # Skybox pipeline
 
-How `tools/make_skybox.py` turns NASA all-sky imagery into the cubemap the scene uses. Run once;
+How `tools/make_skybox.py` turns NASA all-sky imagery into a starfield cubemap. Run once;
 the output `assets/textures/starmap_cubemap.png` (1024×6144, 10.8 MB) is committed, so a fresh
 clone needs neither the tool nor the sources.
+
+**Nothing currently loads it.** The scene's sky is now generated at runtime — a daylight sky from
+`src/sky.rs`, because [[water]] needs something worth reflecting and a night sky gives a mirror
+nothing. The tool and its asset are kept, working, for a night mode. The face convention below is
+still the one in use: `src/sky.rs` writes to the same layout deliberately, so the two skies are
+interchangeable. See [[scene]] for the decision.
 
 ```bash
 python3 tools/make_skybox.py --check            # geometry asserts only, no downloads
@@ -96,5 +102,6 @@ crossing face boundaries without a discontinuity.
 
 ## Related
 
-- [[scene]]: the spec that locks the cubemap decision
+- [[scene]]: the spec that locks the cubemap decision, and that replaced this sky with a daylight one
+- [[water]]: why the sky changed
 - [[bevy-0-19-api]]: how the stacked PNG is reinterpreted as a cubemap at load time
