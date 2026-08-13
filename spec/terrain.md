@@ -150,9 +150,10 @@ orientation, and a second source of hex geometry competing with `corner_offsets`
 [[bevy-0-19-api]] so it is not re-proposed.
 
 **A skirt and an underside, added later.** The surface here is a bare shell: the grid's edge is a
-level lip with nothing beneath it, so with back-face culling it is see-through from below, which the
-orbit camera can reach, and a raised rim cell shows sky underneath it at a low angle. That was
-accepted deliberately at first, in exchange for the geometry staying purely a function of the
+level lip with nothing beneath it, so with back-face culling it is see-through from below — which
+the camera now reaches outright rather than grazes, [[camera-controls]] flying it clean under the
+grid — and a raised rim cell shows sky underneath it at a low angle. That was accepted
+deliberately at first, in exchange for the geometry staying purely a function of the
 heights — the objection being a base depth that is a fudge and a boundary case in every builder.
 Both objections turned out to be answerable: the depth is a floor under the grid's own lowest
 ground, and a prism closed on *every* location has no boundary case to get wrong. See [[skirt]],

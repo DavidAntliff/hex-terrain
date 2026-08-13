@@ -6,18 +6,19 @@ updated: 2026-08-13
 ---
 # Spec: Scene shell
 
-The shell every other feature is displayed in: a daylight sky that also lights the scene, an orbit
-camera, clean exit, and the native and web build paths. What the scene *contains* is other specs'
-business — currently [[hex-grid]].
+The shell every other feature is displayed in: a daylight sky that also lights the scene, a camera,
+clean exit, and the native and web build paths. What the scene *contains* is other specs' business —
+currently [[hex-grid]]. How the camera is *moved* is [[camera-controls]]', promoted out of here once
+it grew past orbit and zoom.
 
 ## Requirements
 
 ### Goal (definition of done)
 
 `cargo run` opens a window showing the scene's contents under a daylight sky, over ground that
-hazes into that sky at the horizon rather than meeting it at a line; right-drag orbits the camera
-about the origin, the scroll wheel zooms, Escape exits cleanly. The same scene, built to wasm and
-served by any static web server, renders identically in Firefox and Chrome.
+hazes into that sky at the horizon rather than meeting it at a line; the camera can be moved (see
+[[camera-controls]] for how), and Escape exits cleanly. The same scene, built to wasm and served by
+any static web server, renders identically in Firefox and Chrome.
 
 ### Constraints
 
@@ -26,6 +27,9 @@ served by any static web server, renders identically in Firefox and Chrome.
   agreement: `serde` and `serde_json` are admitted for the scene report, which is
   [[instrumentation]]'s and is not part of the shell. The reasoning is on that page; the rule here
   is unchanged for everything the shell itself does, and there is still no CLI crate.
+  - A Bevy **feature** is not a third-party crate. `features = ["free_camera"]` on the `bevy`
+    dependency pulls the first-party `bevy_camera_controller`, and the dependency list is still one
+    line long. See [[camera-controls]].
 - **Web parity is non-negotiable.** Anything added must build for `wasm32-unknown-unknown`.
   This rules out several conveniences; see Design discussion.
 - **A fresh clone must run** with no asset-generation step.
@@ -33,14 +37,16 @@ served by any static web server, renders identically in Firefox and Chrome.
   is what rules out compute shaders, and with them Bevy's procedural `Atmosphere` and every
   runtime-generated environment map; see Design discussion.
 - **Skybox imagery must be freely licensed** and attributed where required.
-- The camera orbits the **origin only**; there is no pan.
 - **The scene is lit in physical units.** Illuminance in lux, sky luminance in cd/m², and the
   camera's `Exposure` set for daylight — no level tuned against the one beside it.
 
 ### Functional requirements
 
-In scope: the sky, lighting, orbit + zoom + exit input, the native and web build paths, the tooling
-that generates a skybox texture, and which of the named scenes the shell loads.
+In scope: the sky, lighting, the camera entity and clean exit, the native and web build paths, the
+tooling that generates a skybox texture, and which of the named scenes the shell loads.
+
+Out of scope since it grew past orbit and zoom: how the camera is moved, by hand or from a script.
+That is [[camera-controls]]. The shell still spawns the camera and gives it its starting pose.
 
 Out of scope since it grew past a single screenshot: driving and reading the app from a script —
 aiming the camera, capturing a batch, reporting scene state. That is [[instrumentation]].
@@ -50,11 +56,12 @@ and any gameplay.
 
 ## Design discussion
 
-**Camera controller — write it, don't take one.** Bevy 0.19 ships first-party controllers in
-`bevy_camera_controller` (`free_camera`, `pan_camera`), but neither orbits a fixed target, so
-neither meets the requirement. A third-party orbit-camera crate would satisfy it but violates
-the one-dependency constraint for roughly twenty lines of work. Decision: a local `Orbit`
-component holding `yaw`/`pitch`/`radius`, with one system writing the `Transform`. Locked.
+**Camera controller — write the orbit, take the flight.** Bevy 0.19 ships first-party controllers
+in `bevy_camera_controller` (`free_camera`, `pan_camera`), and neither orbits a target, so that part
+is a local `Orbit` component holding `yaw`/`pitch`/`radius`/`target`. A third-party orbit-camera
+crate would have satisfied it but violates the one-dependency constraint for roughly twenty lines of
+work. Flying is the part `free_camera` does well, and it is a Bevy feature rather than a crate, so
+it is taken rather than written twice. Locked; the details are [[camera-controls]]'.
 
 **Skybox — a real cubemap, not a textured sphere.** An inverted sphere with an equirectangular
 texture is fewer lines, but it is finite geometry: it clips as the camera zooms out and needs
@@ -132,7 +139,7 @@ lives in `src/sky.rs`, the camera in `src/camera.rs`, and everything a script dr
 
 - `setup` — spawns a `DirectionalLight` at `lux::DIRECT_SUNLIGHT`, a `GlobalAmbientLight` of zero,
   and the camera carrying `Camera3d`, a `Transform` from `place()`, `Exposure::SUNLIGHT`, the
-  `Skybox`, an `EnvironmentMapLight` and `Orbit`.
+  `Skybox`, an `EnvironmentMapLight`, `Orbit` and `FreeCamera`.
 - `SUN_DIR` — one constant, aiming both the `DirectionalLight` and the sky's sun, so the sky's sun
   and the highlight the water throws off it cannot drift apart.
 - `sky::Sky` — `sun`, `turbidity`, `ground` and `haze`, and two outputs: `cubemap()` for the
@@ -151,13 +158,9 @@ lives in `src/sky.rs`, the camera in `src/camera.rs`, and everything a script dr
   - The image is built with its cube view descriptor already set, so **no `patch_cubemap` step
     exists any more**. A generated image needs no load-state polling, no
     `reinterpret_stacked_2d_as_array`, and no re-upload guard — the whole system was deleted.
-- `place(&Orbit) -> Transform` — the single place spherical coordinates become a transform,
-  shared by `setup` and `orbit` so the first frame is already correct.
-- `orbit` — reads `ButtonInput<MouseButton>`, `AccumulatedMouseMotion` and
-  `AccumulatedMouseScroll`. Pitch is clamped just short of ±π/2, where `looking_at`
-  degenerates. Scroll is normalised by `AccumulatedMouseScroll::unit`, because browsers report
-  pixel deltas roughly 50× larger than a desktop mouse's line deltas — without this, zoom is
-  unusable in the browser while feeling fine natively.
+- `place(&Orbit) -> Transform` — the single place spherical coordinates become a transform, shared
+  by `setup` with the scripted poses and `reset_view` so the first frame is already correct.
+  Everything else about moving the camera, including `FreeCameraPlugin`, is [[camera-controls]]'.
 - `exit_on_escape` — writes `AppExit::Success`, which is the graceful path: Bevy finishes the
   frame, drops the world and closes the window itself.
 - `named_scene` — resolves the first argument through `hex::scenes::build`, or exits 2 listing the
@@ -208,9 +211,10 @@ Performed:
   scene; `cargo run -- nope` prints `unknown scene "nope"; one of: sea, two-lakes` and exits 2
   without opening a window. A test asserts every registered name builds a grid of 37 locations.
 
-Not verified: a physical Escape keypress, and mouse-drag/scroll behaviour by hand. No
-key-injection tool was available, so the input paths are covered by the headless test and by
-inspection only. **Anyone changing the input code should confirm the feel manually.**
+Not verified: a physical Escape keypress. No key-injection tool was available, so the input paths
+are covered by the headless test and by inspection only. The same limitation applies to the camera,
+where it matters much more — [[camera-controls]] carries the list of things to check by hand.
+**Anyone changing the input code should confirm the feel manually.**
 
 Not verified this time round: Chrome. `WGPU_BACKEND=gl` is worth knowing about as a cheap native
 proxy for the GLSL path, and worth knowing it may not be available — neither the NVIDIA driver nor
@@ -222,7 +226,6 @@ a software Mesa fallback offered wgpu a GL adapter here.
 
 Deliberate omissions, each marked with a `ponytail:` comment at the relevant site in the code:
 
-- `Orbit` has no `target` field; the camera cannot pan.
 - Generated sky faces are 256². `sky::FACE` can go higher, at a startup cost, if the sky ever
   gains a feature sharper than its haze band — a solar disc, or clouds.
 - The environment map is a three-colour hemispherical gradient rather than a prefiltered version of
@@ -241,6 +244,7 @@ of assets, untuned; and the committed cubemap is 10.8 MB of binary in git histor
 
 ## Related
 
+- [[camera-controls]]: how the camera is moved, promoted out of here
 - [[hex-grid]]: what the scene currently displays
 - [[terrain]]: what the named scenes hold, and what `two-lakes` was built to show
 - [[skybox-pipeline]]: how the cubemap asset is generated

@@ -37,8 +37,10 @@ Two directions of knowledge, deliberately kept apart:
   location, joined to its neighbours by inclined walls — with picking and shadows.
   `status: stale` — three claims about how far a water surface reaches, and about ground lying
   exactly at a water level, were written before the cases that disprove them. Detail on the page.
-- [[scene]]: the scene shell — a generated daylight sky that also lights the grid, orbit camera,
-  clean exit, native and web build paths. `status: implemented`.
+- [[scene]]: the scene shell — a generated daylight sky that also lights the grid, the camera
+  entity, clean exit, native and web build paths. `status: implemented`.
+- [[camera-controls]]: how the camera is moved — hold the right button to fly, middle-drag to turn
+  about the point under the cursor, and no modes anywhere. `status: implemented`.
 - [[instrumentation]]: driving and reading the app from a script — naming a camera pose, capturing a
   batch of frames, and dumping scene state as JSON, without disturbing the interactive app.
   `status: implemented`.
@@ -68,5 +70,3 @@ fine — it marks one of these.
 
 - `hex-algorithms`: ranges, rotations, line drawing and pathfinding. The reference covers them all;
   none are implemented, and cube coordinates are in place to make them easy.
-- `camera-controls`: promote out of [[scene]] if the camera grows beyond orbit+zoom
-  (panning, focus targets, keyboard movement).

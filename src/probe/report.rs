@@ -62,11 +62,16 @@ pub struct Run {
 
 /// Where the camera was — in the spherical terms it is steered in, and in the world terms that
 /// decide what is actually on screen.
+///
+/// The spherical terms are relative to `target`, which is no longer always the origin: it is the
+/// point the last turn or pan was about. Without it, `yaw_deg`/`pitch_deg`/`radius` do not say
+/// where the camera is.
 #[derive(Serialize)]
 pub struct Camera {
     pub yaw_deg: f32,
     pub pitch_deg: f32,
     pub radius: f32,
+    pub target: [f32; 3],
     pub translation: [f32; 3],
     /// Vertical, matching Bevy's own convention.
     pub fov_deg: Option<f32>,
@@ -197,6 +202,7 @@ fn camera(sources: &ReportSources) -> Camera {
             yaw_deg: f32::NAN,
             pitch_deg: f32::NAN,
             radius: f32::NAN,
+            target: [f32::NAN; 3],
             translation: [f32::NAN; 3],
             fov_deg: None,
             aspect: None,
@@ -211,6 +217,7 @@ fn camera(sources: &ReportSources) -> Camera {
         yaw_deg: orbit.yaw.to_degrees(),
         pitch_deg: orbit.pitch.to_degrees(),
         radius: orbit.radius,
+        target: orbit.target.to_array(),
         translation: transform.translation.to_array(),
         fov_deg: perspective.map(|p| p.fov.to_degrees()),
         aspect: perspective.map(|p| p.aspect_ratio),
