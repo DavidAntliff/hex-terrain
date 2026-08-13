@@ -107,6 +107,17 @@ not obvious:
 The workflow installs a pinned trunk release tarball rather than `cargo install trunk` (minutes) or
 a third-party action. Trunk then fetches its own matching wasm-bindgen, so nothing else is needed.
 
+**Pages gzips the wasm, which is most of the size problem already solved.** Measured against the
+live site on 2026-08-13: `content-encoding: gzip`, `content-length: 13,629,776` — 13.6 MB over the
+wire for the 52 MB file. Quote the compressed figure when talking about load time, and weigh any
+`wasm-opt` work against 14 MB rather than 52 MB.
+
+First (cold) run took **12m10s** end to end and saved a 473 MiB cache. `Swatinem/rust-cache` keeps
+`~/.cargo` and the dependency half of `./target`, deliberately pruning this crate's own artefacts, so
+a later push recompiles `hex-terrain` and re-links rather than rebuilding Bevy. Two things reset that
+to cold: a `Cargo.lock` or rustc change, since both are in the cache key, and GitHub evicting an
+entry untouched for 7 days.
+
 Verified on 2026-08-13 before the first deploy: the release build served from a `/hex-terrain/`
 subpath renders, fetches `assets/shaders/water.wgsl` (200), and logs only the expected WebGL2
 downlevel warnings (no OIT, no background motion vectors, no SSAO, no atmosphere — see

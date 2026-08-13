@@ -521,9 +521,12 @@ merely against the consumer — is now in [[bevy-0-19-api]].
 - `index.html` now copies `assets/shaders` rather than all of `assets/`, which stops shipping the
   11 MB starmap cubemap that [[skybox-pipeline]] records as unwired. `data-target-path` preserves the
   runtime path. The deployed bundle went ~63 MB → ~50 MB with no change to the wasm.
-- Release wasm size still has had no attention. `data-wasm-opt="z"` is the cheapest lever and is
-  release-only, so it costs dev builds nothing; the workflow prints the bundle sizes into the run
-  summary so the decision can be made against numbers.
+- Release wasm size still has had no attention, and needs less than it looked: **Pages serves the
+  wasm gzipped, 13.6 MB over the wire for the 52 MB file**, measured against the live site. Any
+  `wasm-opt` work is therefore against a 14 MB download, not a 52 MB one. `data-wasm-opt="z"` remains
+  the cheapest lever and is release-only, so it costs dev builds nothing.
+- The cold run took 12m10s and saved a 473 MiB cache; a `Cargo.lock` or rustc change, or 7 days of
+  no pushes, resets it to cold. Both figures are in [[build-performance]].
 - Verified: built locally with `--public-url /hex-terrain/`, served from that subpath, and loaded in
   Chrome — the scene renders, `water.wgsl` returns 200, and only the expected WebGL2 downlevel
   warnings appear. `trunk serve` was **not** re-run; the change alters where trunk writes the asset,

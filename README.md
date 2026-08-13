@@ -1,5 +1,10 @@
 # hex-terrain
 
+[![Deploy web build to Pages](https://github.com/DavidAntliff/hex-terrain/actions/workflows/pages.yml/badge.svg)](https://github.com/DavidAntliff/hex-terrain/actions/workflows/pages.yml)
+
+**[Run it in a browser](https://davidantliff.github.io/hex-terrain/)** — the live wasm build. It is
+a ~14 MB download, so give it a moment on first load.
+
 <img src="images/hex-terrain_001.png" alt="A hexagonal grid of terrain prisms flooded to a water level, with the selection panel and axis compass" width="700">
 
 A Bevy 0.19 sandbox: a hexagonal grid of terrain and water under a daylight sky, with editor-style
@@ -104,7 +109,8 @@ at the same time serialise on a lock; see `spec/wiki/build-performance.md`.
 ## Web
 
 **Live at [davidantliff.github.io/hex-terrain](https://davidantliff.github.io/hex-terrain/)** — a
-push to `main` rebuilds and redeploys it. It is a ~50 MB wasm download, so give it a moment.
+push to `main` rebuilds and redeploys it. The wasm is 52 MB on disk but 14 MB over the wire, because
+Pages serves it gzipped.
 
     trunk serve --open                      # dev server on 127.0.0.1:8080
 
