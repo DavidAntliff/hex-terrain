@@ -262,6 +262,24 @@ value where you cannot.
 Both use `bevy_picking` under the hood, which is what makes a UI click also reachable by
 world-space picking code — see `Hovered` below.
 
+## Change detection counts insertion as a change
+
+`Res<T>::is_changed()` is true on a system's first run, because inserting the resource sets its
+changed tick along with its added tick. A system gated on `if !thing.is_changed() { return; }`
+therefore fires once at startup, before the user has touched anything.
+
+Usually harmless, and load-bearing when the gated work is *building* something from the resource.
+It bites when the work **overwrites** state some other source of truth also owns: a system writing a
+resource's value into the model wipes whatever the model was initialised with, on the first frame,
+before any of it reaches the screen. `Res<T>::is_added()` distinguishes the two, so the guard reads
+
+```rust
+if !thing.is_changed() || thing.is_added() { return; }
+```
+
+Same trait (`DetectChanges`) for `ResMut`, `Ref` and `Mut`, and the same reasoning applies to
+`Changed<T>` query filters, which also match components on the frame they are inserted.
+
 ## Other
 
 - **`Assets::get_mut` returns a guard**, not a plain `&mut`, so it needs `let mut image = …`.

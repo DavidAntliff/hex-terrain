@@ -317,3 +317,13 @@ forms — worth pinning a size for any screenshot A/B, since otherwise a tiling 
 different geometry per run and the diff is meaningless. And the ripple animation makes two runs differ
 by a speckle everywhere there is water, so an `AE` count is a floor on the real difference, not the
 difference itself.
+
+## [2026-08-13] note | [[terrain]] and [[water]] marked stale
+
+Flagged rather than rewritten, since reconciling the wording needs agreement. Both are the deficient
+side of the contradiction — the code is doing what it should, and the prose predates the cases that
+disprove it. [[terrain]] carries three: the one-ring rule is stated too coarsely now that reach is per
+half-sector; "the data has to be sensible rather than the renderer policing it" fails in both
+directions; and "ground exactly at the water line reads as submerged" was a bug, not a property.
+[[water]]'s is the constraint pinning a plate to a seven-vertex fan, whose *reason* still stands even
+though the count does not. Statuses are mirrored in [[home]], which repeats them inline.

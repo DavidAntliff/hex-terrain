@@ -1,7 +1,7 @@
 ---
 tags: [water, rendering, shader, spec]
 type: spec
-status: implemented
+status: stale
 updated: 2026-08-13
 ---
 # Spec: Water surface
@@ -162,7 +162,20 @@ from repeating is argued from the arithmetic rather than observed.
 
 ## Implementation status
 
-**status:** implemented — spec and code agree. No known divergences.
+**status:** stale — one constraint is contradicted, and this document is the deficient side of it.
+Reconciling the wording needs agreement and has not been done.
+
+**"No geometry changes. The plate is a seven-vertex fan and stays one"** is violated: a plate now has
+thirteen vertices — centre, six lattice corners, six edge midpoints — and draws up to twelve triangles,
+of which it may draw only some. The constraint's *reason* still stands untouched: nothing is
+subdivided in order to displace a surface, and the normal is still what makes the glitter. The
+midpoints were added for two other reasons, both in [[terrain]]'s territory rather than this spec's —
+they halve a sector so a water level can be granted only the part of a location its own body reaches,
+and they put a vertex over the bridge, where the old chord from corner to corner interpolated between
+two corner means and missed the different height running underneath. So the shallows along an edge
+used to be shaded from a depth the water does not have there; they now are not.
+
+Nothing about the shading this spec actually owns has changed.
 
 Deliberate omissions:
 

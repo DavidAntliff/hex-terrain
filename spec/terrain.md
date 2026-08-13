@@ -1,7 +1,7 @@
 ---
 tags: [terrain, elevation, spec]
 type: spec
-status: implemented
+status: stale
 updated: 2026-08-13
 ---
 # Spec: Terrain height
@@ -274,7 +274,31 @@ and now dragging the sea-level slider, which has never been dragged, only preset
 
 ## Implementation status
 
-**status:** implemented — spec and code agree. No known divergences.
+**status:** stale — three claims below are wrong, and this document is the deficient side of each.
+The code is doing what it should; the prose was written before the cases that disprove it. Reconciling
+the wording needs agreement and has not been done.
+
+1. **The one-ring rule is stated too coarsely.** A water surface still reaches one ring past the
+   flooded locations, but it no longer covers the *whole* hexagon of a location it reaches into. The
+   hexagon divides into six sectors halved at their edge midpoints, and a level covers a half only if
+   the body holding it touches that half — across its edge, or at the corner it reaches. See
+   `water_plates` in `src/view/grid_render.rs`.
+2. **"The data has to be sensible rather than the renderer policing it" no longer holds**, in either
+   direction. It claimed a step in the water needs ground between two bodies that is below both; a
+   land bridge one hex wide standing *above* both still stepped, because the wall between two caps is
+   the mean of two heights and is not itself ground above both. And the renderer now does police it:
+   two levels can no longer cover the same piece on sensible data, because a half-sector touches only
+   two neighbours and two bodies at different levels are never neighbours. The `two-lakes` and
+   `terraces` scenes exist to show both halves of this.
+3. **"Ground exactly at the water line reads as submerged" is no longer true, and was a bug.** The
+   epsilon separating a plate from the terrain now points *down*, so the ground wins the tie and land
+   level with the water reads as land. Lifting it covered half of every such location in zero-depth
+   water — a pale line across the dry diagonal `undulating` puts at a bitwise zero.
+
+Also worth reflecting when the prose is revised: a plate is no longer a seven-vertex fan of six
+triangles. It has thirteen vertices and up to twelve triangles, the six new ones being edge midpoints,
+which sit over a bridge and so carry a depth the old corner-to-corner chord got wrong. See [[water]],
+whose constraint on that geometry this contradicts.
 
 Deliberate omissions:
 

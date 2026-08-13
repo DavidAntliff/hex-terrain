@@ -35,11 +35,13 @@ Two directions of knowledge, deliberately kept apart:
   labels, axis compass, click selection, debug readout. `status: implemented`.
 - [[terrain]]: elevation as per-location data, drawn as a continuous surface — a level cap per
   location, joined to its neighbours by inclined walls — with picking and shadows.
-  `status: implemented`.
+  `status: stale` — three claims about how far a water surface reaches, and about ground lying
+  exactly at a water level, were written before the cases that disprove them. Detail on the page.
 - [[scene]]: the scene shell — a generated daylight sky that also lights the grid, orbit camera,
   clean exit, native and web build paths. `status: implemented`.
 - [[water]]: how a water plate is shaded — a ripple field for the sun to glitter on, and shallows
-  coloured from the model's own heights rather than the depth buffer. `status: implemented`.
+  coloured from the model's own heights rather than the depth buffer. `status: stale` — the plate is
+  no longer the seven-vertex fan one constraint pins it to. The shading it owns is unaffected.
 
 ## Wiki
 
