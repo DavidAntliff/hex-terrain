@@ -1,5 +1,7 @@
 # hex-terrain
 
+<img src="images/hex-terrain_001.png" alt="A hexagonal grid of terrain prisms flooded to a water level, with the selection panel and axis compass" width="700">
+
 A Bevy 0.19 sandbox: a hexagonal grid of terrain and water under a daylight sky, with editor-style
 camera controls. The grid is a hexagon of side 4 — 37 locations — addressable in axial, cube and
 doubled coordinates, following
