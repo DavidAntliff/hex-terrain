@@ -215,9 +215,42 @@ ground. Either separation stops the z-fighting; only one of them is right.
 
 `Window { resolution: (1600.0, 900.0).into(), .. }` does not compile. The `From` impls are
 `(u32, u32)`, `[u32; 2]` and `UVec2` (`bevy_window/src/window.rs`) — logical pixels are integral
-here. Write `(1600u32, 900u32).into()`. Worth knowing when pinning a size to make two screenshots
-pixel-comparable: without it a tiling window manager hands out whatever geometry it likes and an
-image diff between two runs is meaningless.
+here. Write `(1600u32, 900u32).into()`. `WindowResolution` is **not in the prelude**, unlike `Window`
+itself; import it from `bevy::window`.
+
+### Asking for a size is not getting one
+
+Pinning a size is what makes two screenshots pixel-comparable — without it a tiling window manager
+hands out whatever geometry it likes and an image diff between two runs is meaningless. Setting
+`resolution` alone does not achieve it. Three separate things are in the way, and only two can be
+fixed from the `Window` descriptor:
+
+- **The window manager.** A tiling WM ignores the requested geometry for a tiled window. The lever
+  that works is `WindowResizeConstraints` with `min_width == max_width` and `min_height ==
+  max_height`: i3 auto-floats a window whose minimum and maximum sizes are equal, which takes it out
+  of the layout. Measured: without it, two invocations gave 3840×2320 and 2392×845; with it, both
+  gave the requested aspect ratio exactly.
+- **The scale factor**, which decides what units the resize constraints are read in.
+  `WindowResolution::new` stores *physical* pixels but defaults `scale_factor` to 1.0;
+  `with_scale_factor_override(1.0)` fixes the ratio so constraints and resolution are the same
+  numbers.
+- **The creation-time multiply, which cannot be fixed.** `bevy_winit/src/system.rs` calls
+  `resolution.set_scale_factor_and_apply_to_physical_size(winit_window.scale_factor())`
+  unconditionally on window creation, multiplying the requested physical size by the backend's
+  factor **whether or not `scale_factor_override` is set**. On a 2× display, asking for `1280x720`
+  yields a 2560×1440 framebuffer. So the request behaves as *logical* pixels, and the honest move is
+  to read the size back — `window.resolution.physical_width()` / `physical_height()` — and record
+  it, rather than assume the request held. See [[instrumentation]], whose report carries it.
+
+## A `ParamSet` is the answer to B0001 across a `SystemParam`
+
+A system that both writes a component and reads it through a bundled `SystemParam` panics at
+startup with `error[B0001] … accesses component(s) … in a way that conflicts with a previous system
+parameter`, even when the two accesses provably never happen on the same frame — Bevy resolves
+conflicts from the signature, not from the control flow. Wrapping them as
+`ParamSet<(Query<&mut T>, MyParams)>` and reaching through `params.p0()` / `params.p1()` is the fix;
+a whole custom `SystemParam` nests inside a `ParamSet` unchanged. Note that the panic message is
+useless by default — every name reads `<Enable the debug feature to see the name>`.
 
 ## Mesh primitives
 

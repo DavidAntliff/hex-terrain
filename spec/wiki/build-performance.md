@@ -67,11 +67,17 @@ Output sizes, both untuned:
 | Build | wasm | assets |
 |---|---|---|
 | debug | 100 MB | 11 MB |
-| release | 51 MB | 11 MB |
+| release | 52 MB | 11 MB |
 
 Debug wasm is too large to be practical over HTTP; use `--release` for anything but a local
 smoke test. Release wasm size has had no attention — `opt-level = "s"`, LTO, and `wasm-opt`
 are the obvious levers if it starts to matter.
+
+The release figure is `dist/*_bg.wasm` after `trunk build --release`, measured at 52,336,672 bytes
+once `serde`/`serde_json` had been added for [[instrumentation]]'s report. It was 51 MB before, but
+**no controlled before/after was run** — other changes landed between the two measurements, so the
+serde contribution is not separated out. It is at most about a megabyte against a 52 MB baseline,
+which is why it was not worth measuring properly.
 
 ## Traps
 

@@ -8,11 +8,13 @@ use bevy::{
         Skybox,
     },
     prelude::*,
+    // Not in the prelude, unlike `Window` itself.
+    window::{WindowResizeConstraints, WindowResolution},
 };
 
 use hex_terrain::camera::{self, place, Orbit};
 use hex_terrain::hex::{scenes, TerrainGrid};
-use hex_terrain::screenshot::ScreenshotOnDemandPlugin;
+use hex_terrain::probe::{ProbePlugin, WINDOW};
 use hex_terrain::sky::Sky;
 use hex_terrain::view::{GridModel, HexLayout, HexViewPlugin};
 
@@ -31,16 +33,20 @@ fn main() {
     // Before the app, so an unknown scene name costs nothing but the message.
     let grid = named_scene();
 
+    let pinned = pinned_resolution();
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "hex-terrain".into(),
                 fit_canvas_to_parent: true,
+                resize_constraints: size_hints(&pinned),
+                resolution: pinned.unwrap_or_default(),
                 ..default()
             }),
             ..default()
         }))
-        .add_plugins((HexViewPlugin, ScreenshotOnDemandPlugin))
+        .add_plugins((HexViewPlugin, ProbePlugin))
         .insert_resource(HexLayout::pointy(HEX_SCALE).with_height_scale(HEIGHT_SCALE))
         .insert_resource(GridModel(grid))
         .add_systems(Startup, setup)
@@ -60,6 +66,61 @@ fn named_scene() -> TerrainGrid {
         eprintln!("unknown scene {name:?}; one of: {}", names.join(", "));
         std::process::exit(2);
     })
+}
+
+/// `HEX_TERRAIN_WINDOW=<W>x<H>`, or `None` for whatever the window manager decides.
+///
+/// Pinning the size is what makes two runs comparable at all: an image diff between screenshots of
+/// different sizes is measuring the window manager, not the scene. Lives here rather than in
+/// `probe` because the window is `main`'s to configure, and it is useful on its own — a run that
+/// only wants a repeatable frame size sets nothing else.
+///
+/// **The numbers are logical pixels.** The PNG is that times the display's scale factor, so a 2×
+/// screen turns `1280x720` into a 2560×1440 image. This is not adjustable from here: `bevy_winit`
+/// multiplies the requested physical size by the backend scale factor when the window is created,
+/// and does so whether or not `scale_factor_override` is set. The override is still worth setting —
+/// it fixes the logical-to-physical ratio the resize constraints below are interpreted in — but it
+/// does not stop the multiplication. The report records the size actually rendered.
+fn pinned_resolution() -> Option<WindowResolution> {
+    let spec = std::env::var(WINDOW).ok()?;
+    let parsed = spec
+        .trim()
+        .split_once(['x', 'X'])
+        .and_then(|(w, h)| Some((w.trim().parse::<u32>().ok()?, h.trim().parse::<u32>().ok()?)));
+    match parsed {
+        Some((w, h)) if w > 0 && h > 0 => {
+            Some(WindowResolution::new(w, h).with_scale_factor_override(1.0))
+        }
+        _ => {
+            eprintln!("bad {WINDOW} {spec:?}; expected <width>x<height>, e.g. 1280x720");
+            std::process::exit(2);
+        }
+    }
+}
+
+/// Fixed minimum and maximum size, which is how a size request survives a window manager.
+///
+/// A tiling WM gives a tiled window whatever geometry its layout dictates and ignores the size the
+/// application asked for. Equal min and max hints are the standard way to say the window is not
+/// resizable, and i3 in particular auto-floats a window whose minimum and maximum sizes are equal —
+/// which is exactly what takes it out of the tiling layout and lets the requested size stand.
+///
+/// Constraints are in logical pixels; [`pinned_resolution`] pins the scale factor at 1.0, so they
+/// are the same numbers.
+fn size_hints(pinned: &Option<WindowResolution>) -> WindowResizeConstraints {
+    let Some(resolution) = pinned else {
+        return default();
+    };
+    let (w, h) = (
+        resolution.physical_width() as f32,
+        resolution.physical_height() as f32,
+    );
+    WindowResizeConstraints {
+        min_width: w,
+        max_width: w,
+        min_height: h,
+        max_height: h,
+    }
 }
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {

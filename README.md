@@ -1,8 +1,11 @@
 # hex-terrain
 
-A Bevy 0.19 sandbox: a hexagonal grid under an all-sky starfield, with an orbit camera. The grid is a
-hexagon of side 4 — 37 locations — addressable in axial, cube and doubled coordinates, following
-[Red Blob Games' hexagon guide](https://www.redblobgames.com/grids/hexagons/).
+A Bevy 0.19 sandbox: a hexagonal grid of terrain and water under a daylight sky, with an orbit
+camera. The grid is a hexagon of side 4 — 37 locations — addressable in axial, cube and doubled
+coordinates, following [Red Blob Games' hexagon guide](https://www.redblobgames.com/grids/hexagons/).
+
+The sky is generated at startup from an analytic daylight model, and also lights the scene — so
+there is no sky asset to fetch and a fresh clone runs as-is.
 
 Design notes and accumulated knowledge live in `spec/` — start at `spec/home.md`.
 
@@ -12,8 +15,39 @@ Design notes and accumulated knowledge live in `spec/` — start at `spec/home.m
   pointy-top against flat-top, show or hide the axis compass, move the sea level, and reset the view
   to look straight down with everything in frame.
 
-Set `HEX_TERRAIN_SCREENSHOT=<path>` to save a PNG of the scene and exit — useful for checking a change
-without a window manager in the way.
+## Driving it from a script
+
+The app can be aimed, captured and read without anyone at the keyboard. Every variable below is
+optional and off by default, so a plain `cargo run` is unaffected.
+
+    HEX_TERRAIN_CAMERA='top;iso;low;fit' \
+    HEX_TERRAIN_SCREENSHOT=/tmp/s.png \
+    HEX_TERRAIN_REPORT=/tmp/s.json \
+    HEX_TERRAIN_WINDOW=1280x720 \
+      cargo run -- two-lakes
+
+| Variable                 | Value                    | Effect                                          |
+| ------------------------ | ------------------------ | ----------------------------------------------- |
+| `HEX_TERRAIN_CAMERA`     | `;`-separated poses      | Aims the camera; one capture per pose.          |
+| `HEX_TERRAIN_SCREENSHOT` | path                     | A PNG per capture, then exit.                   |
+| `HEX_TERRAIN_REPORT`     | path, or `-` for stdout  | A JSON report per capture.                      |
+| `HEX_TERRAIN_INTERVAL`   | `<frames>x<count>`       | Capture `count` times per pose, `frames` apart. |
+| `HEX_TERRAIN_WINDOW`     | `<W>x<H>`                | Pins the window size, in logical pixels.        |
+
+A pose is a preset — `top`, `iso`, `low`, or `fit` (framed on the whole scene) — or
+`yaw,pitch,radius` in degrees, degrees and world units. With more than one capture an index goes in
+before the extension (`/tmp/s-00.png`, `-01`, …); a single capture writes exactly the path given.
+
+The report says what a picture cannot: the pose actually used, the window really rendered, mesh and
+vertex counts per kind, the model's heights and water levels, and the frame rate. It is also the
+index — each one names the pose and tick it came from.
+
+Screenshots come from the app's own framebuffer rather than the X server, because a window on an
+inactive workspace is unmapped and captures blank. Pinning the size is what makes two runs
+comparable; the image is the pinned size times the display's scale factor, and the report records
+what was actually rendered.
+
+See `spec/instrumentation.md` for the details.
 
 ## Native
 
@@ -41,13 +75,18 @@ Bevy is linked dynamically on native targets, which cuts an edit-rebuild cycle f
     trunk build --release                   # static files in dist/
     python3 -m http.server -d dist 8080     # or any static server
 
-## Regenerating the skybox
+## The starfield cubemap
 
-`assets/textures/starmap_cubemap.png` is committed, so neither of the above needs this.
-To rebuild it (needs ImageMagick with the OpenEXR delegate, plus numpy):
+**Nothing loads this.** The scene's sky was once an all-sky star map; it was replaced by the
+generated daylight sky when water arrived, because a night sky gives a mirror nothing to reflect.
+The generator and its asset are kept, unwired, for a possible night mode — see `spec/scene.md` and
+`spec/wiki/skybox-pipeline.md`.
+
+`assets/textures/starmap_cubemap.png` is committed, so nothing above needs this. To rebuild it
+(needs ImageMagick with the OpenEXR delegate, plus numpy):
 
     python3 tools/make_skybox.py --check          # geometry asserts only
     python3 tools/make_skybox.py --exposure 0.25  # download sources, reproject, write PNG
 
-Skybox imagery: *Deep Star Maps 2020*, NASA/Goddard Space Flight Center Scientific
+Starfield imagery: *Deep Star Maps 2020*, NASA/Goddard Space Flight Center Scientific
 Visualization Studio, incorporating ESA/Gaia data. Public domain.

@@ -6,6 +6,12 @@ edition = "2024"
 [dependencies]
 bevy = "0.19"
 
+# The scene report only (`src/probe/report.rs`). A typed schema is what keeps machine-read output
+# from drifting silently as fields are added; hand-rolled JSON would not. Nothing else in the crate
+# derives Serialize — see spec/instrumentation.md.
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
 # Link bevy as a shared library so an edit-rebuild cycle relinks ~20 MB instead of ~1.7 GB.
 # Scoped to non-wasm because the feature does not build for wasm at all. Binaries built this
 # way need libbevy_dylib.so at runtime, which `cargo run` handles but a bare copy does not.

@@ -11,6 +11,6 @@
 
 pub mod camera;
 pub mod hex;
-pub mod screenshot;
+pub mod probe;
 pub mod sky;
 pub mod view;

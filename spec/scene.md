@@ -21,8 +21,11 @@ served by any static web server, renders identically in Firefox and Chrome.
 
 ### Constraints
 
-- **One dependency.** `bevy` only. No third-party camera-controller, math, or asset crates —
-  behaviour that costs a few dozen lines is written here instead.
+- **One dependency for the shell.** `bevy` only. No third-party camera-controller, math, or asset
+  crates — behaviour that costs a few dozen lines is written here instead. Amended once, by
+  agreement: `serde` and `serde_json` are admitted for the scene report, which is
+  [[instrumentation]]'s and is not part of the shell. The reasoning is on that page; the rule here
+  is unchanged for everything the shell itself does, and there is still no CLI crate.
 - **Web parity is non-negotiable.** Anything added must build for `wasm32-unknown-unknown`.
   This rules out several conveniences; see Design discussion.
 - **A fresh clone must run** with no asset-generation step.
@@ -37,8 +40,10 @@ served by any static web server, renders identically in Firefox and Chrome.
 ### Functional requirements
 
 In scope: the sky, lighting, orbit + zoom + exit input, the native and web build paths, the tooling
-that generates a skybox texture, the scripted-screenshot mechanism used to verify any of it, and
-which of the named scenes the shell loads.
+that generates a skybox texture, and which of the named scenes the shell loads.
+
+Out of scope since it grew past a single screenshot: driving and reading the app from a script —
+aiming the camera, capturing a batch, reporting scene state. That is [[instrumentation]].
 
 Out of scope, deliberately: whatever the scene displays (see [[hex-grid]]), clouds, time of day,
 and any gameplay.
@@ -122,8 +127,8 @@ default, or be selectable in the panel. Locked.
 ## Implementation details
 
 `src/main.rs` is app wiring: plugins, resources, lighting, the camera, and the sky. The sky model
-lives in `src/sky.rs`, the camera in `src/camera.rs`, the screenshot mechanism in
-`src/screenshot.rs`.
+lives in `src/sky.rs`, the camera in `src/camera.rs`, and everything a script drives the app with in
+`src/probe/` — see [[instrumentation]].
 
 - `setup` — spawns a `DirectionalLight` at `lux::DIRECT_SUNLIGHT`, a `GlobalAmbientLight` of zero,
   and the camera carrying `Camera3d`, a `Transform` from `place()`, `Exposure::SUNLIGHT`, the
@@ -162,10 +167,12 @@ lives in `src/sky.rs`, the camera in `src/camera.rs`, the screenshot mechanism i
   `view` because a grid's extent is dimensionless.
   - Tests must not call it. Under `cargo test` the first argument is the test-name filter, so it
     would exit the harness.
-- `ScreenshotOnDemandPlugin` — `HEX_TERRAIN_SCREENSHOT=<path>` renders 120 frames, saves a PNG of
-  the framebuffer, waits for the asynchronous write, then exits. It exists because capturing the
-  window through the X server is unreliable: a window on an inactive workspace is unmapped and
-  yields a blank image, so scripted visual verification has to come from inside the app.
+- `ProbePlugin` — the scripted-observation mode, specified in [[instrumentation]]. It lives here in
+  outline only because the shell adds it and because the reason for its existence is the shell's:
+  capturing the window through the X server is unreliable, since a window on an inactive workspace
+  is unmapped and yields a blank image, so scripted visual verification has to come from inside the
+  app. `main` additionally reads `HEX_TERRAIN_WINDOW` to pin the window size, the window being its
+  to configure.
 
 The crate is a **library plus a binary** (`src/lib.rs`, `src/main.rs`). The split is what makes
 the model a real API boundary rather than a convention, and it keeps the compiler honest — public

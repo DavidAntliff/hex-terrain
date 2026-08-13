@@ -39,6 +39,9 @@ Two directions of knowledge, deliberately kept apart:
   exactly at a water level, were written before the cases that disprove them. Detail on the page.
 - [[scene]]: the scene shell — a generated daylight sky that also lights the grid, orbit camera,
   clean exit, native and web build paths. `status: implemented`.
+- [[instrumentation]]: driving and reading the app from a script — naming a camera pose, capturing a
+  batch of frames, and dumping scene state as JSON, without disturbing the interactive app.
+  `status: implemented`.
 - [[water]]: how a water plate is shaded — a ripple field for the sun to glitter on, and shallows
   coloured from the model's own heights rather than the depth buffer. `status: stale` — the plate is
   no longer the seven-vertex fan one constraint pins it to. The shading it owns is unaffected.

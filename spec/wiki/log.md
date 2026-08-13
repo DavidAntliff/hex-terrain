@@ -327,3 +327,52 @@ half-sector; "the data has to be sensible rather than the renderer policing it" 
 directions; and "ground exactly at the water line reads as submerged" was a bug, not a property.
 [[water]]'s is the constraint pinning a plate to a seven-vertex fan, whose *reason* still stands even
 though the count does not. Statuses are mirrored in [[home]], which repeats them inline.
+
+## [2026-08-13] feature | the app can be aimed and read from a script
+
+**Camera poses are nameable from outside**, `src/camera.rs`: `parse_pose` takes a preset (`top`,
+`iso`, `low`, `fit`) or `yaw,pitch,radius` in degrees, and `Pose::Fit` defers to
+`framing::reset_view` rather than duplicating the framing maths it already owns. Degrees convert to
+radians at the boundary, so `place` and every existing caller are untouched. Out-of-range values
+clamp rather than reject, matching what dragging already does; an unknown *name* still exits 2.
+
+- This closes something the log recorded two entries ago: reaching a low-pitch view previously meant
+  editing `Orbit::default()` in source and putting it back, because the shell had no way to aim the
+  camera from outside. `HEX_TERRAIN_CAMERA=low` is now the whole operation.
+
+**`src/screenshot.rs` became `src/probe/`**, since it now owns aiming and reporting as well as
+capture. `HEX_TERRAIN_CAMERA` takes a `;`-separated list and `HEX_TERRAIN_INTERVAL=<frames>x<count>`
+repeats each pose, so one launch yields many frames — the launch being the expensive part of any
+visual check. A single capture still writes exactly the path given; only a batch gets an index.
+
+**A JSON report, `src/probe/report.rs`**, is the half a screenshot cannot show. `serde` and
+`serde_json` are the first dependencies past `bevy`, admitted by agreement and scoped to this: the
+serialisation types live in their own module and nothing in `src/hex/` or `src/view/` derives
+`Serialize`, which is the same boundary `Resource` is kept behind. Reporting `entities` alongside
+`vertices` per mesh kind is deliberate — "nothing was spawned" and "something empty was spawned" are
+different bugs and identical pictures.
+
+- `model.water_levels` is distinct levels, not bodies: `water_plates` knows the real partition but
+  computes it per location and does not expose it. On `terraces` it reports `[-0.3, 0.0, 0.55]`,
+  which is the three levels that scene exists to hold.
+
+**Pinning the window turned out to need three things**, two of which worked. Equal min/max
+`WindowResizeConstraints` make i3 auto-float the window and take it out of the tiling layout, which
+is what makes the aspect ratio hold exactly; a scale-factor override fixes the units the constraints
+are read in; but `bevy_winit` multiplies the requested physical size by the backend scale factor at
+window creation regardless of that override, so on a 2× display `1280x720` renders 2560×1440. The
+request is therefore *logical* pixels, and rather than pretend otherwise the report carries the size
+actually rendered — so comparability is checkable instead of assumed. Recorded in
+[[bevy-0-19-api]] along with the `ParamSet` needed to read and write the camera in one system.
+
+- Verified: 75 tests (was 66), the nine new ones covering pose parsing, index suffixing, interval
+  parsing and shot expansion. Four-pose batch over `two-lakes` gives four PNGs and four reports whose
+  `camera` blocks match the poses asked for; `HEX_TERRAIN_REPORT=-` gives parseable JSON Lines;
+  `HEX_TERRAIN_INTERVAL=30x4` captures at frames 130/162/194/226 with the difference confined to the
+  animating water. Two identical pinned runs differ by 6667 px of 3.69M — the ripple floor, not a
+  whole-frame difference — where unpinned runs differed in size outright. `cargo run` alone is
+  unchanged and logs nothing. `trunk build --release` succeeds at 52 MB; the variables are inert on
+  web.
+- New spec [[instrumentation]]. [[scene]] edited by agreement in two places: the screenshot mechanism
+  is now a pointer, and its "one dependency" constraint is scoped to the shell with the serde
+  exemption named.
