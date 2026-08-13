@@ -54,9 +54,14 @@ fn main() {
         .insert_resource(GridModel(grid))
         .init_resource::<camera::Pivot>()
         .add_systems(Startup, setup)
-        // Ahead of `FreeCameraPlugin`'s own systems, which run in `RunFixedMainLoop`: the right
-        // button has to be seen on the frame it goes down or the cursor grab is late.
-        .add_systems(PreUpdate, camera::fly_on_right_button)
+        // Between Bevy's input systems and `FreeCameraPlugin`'s, which run in `RunFixedMainLoop`.
+        // Both halves of that are load-bearing: after `InputSystems` so it reads this frame's
+        // buttons rather than last frame's, and in `PreUpdate` so the controller sees the result
+        // on the frame the button goes down. See spec/camera-controls.md.
+        .add_systems(
+            PreUpdate,
+            camera::fly_on_right_button.after(bevy::input::InputSystems),
+        )
         .add_systems(Update, (camera::orbit, exit_on_escape))
         .run();
 }

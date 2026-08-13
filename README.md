@@ -19,13 +19,13 @@ not.
 | ---------------------------------------- | ------------------------------------------------------------------------ |
 | **Left click**                           | Select a hexagon.                                                        |
 | **Right drag**                           | Fly. Mouse looks, `WASD` moves, `E`/`Q` up and down, `Shift` runs, the wheel changes speed. |
-| **Middle drag**, or **Alt + left drag**  | Turn about the point under the cursor.                                   |
+| **Middle drag**                          | Turn about the point under the cursor.                                   |
 | **Shift + middle drag**                  | Pan.                                                                     |
 | **Wheel**                                | Zoom towards the cursor.                                                 |
 | **Escape**                               | Quit.                                                                    |
 
-Middle-drag and Alt+left-drag do the same thing on purpose: `Alt` is the Unity binding, but i3 and
-most Linux window managers grab `Alt`+drag before the app sees it.
+Turning is on the middle button rather than Unity's `Alt`+left because i3 — and most Linux window
+managers — grab `Alt`+drag for themselves before the app ever sees it.
 
 The panel top right reports the selected hexagon in axial, cube and doubled coordinates plus world
 position, and carries five controls: cycle the per-hex labels (axial / cube / doubled / off), toggle

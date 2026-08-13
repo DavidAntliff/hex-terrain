@@ -176,6 +176,20 @@ order is `First → PreUpdate → RunFixedMainLoop → Update → SpawnScene →
 controller on the same frame as an input edge belongs in **`PreUpdate`** — from `Update` it is
 always a frame late.
 
+## Gating a plugin on input: order against `InputSystems`, not just the schedule
+
+`bevy_input` updates `ButtonInput` in `PreUpdate`, inside the `InputSystems` set
+(`bevy_input/src/lib.rs`). Systems within a schedule are otherwise **unordered**, so a `PreUpdate`
+system reading `ButtonInput` without `.after(bevy::input::InputSystems)` may run first and see the
+*previous* frame's state. Anything it then enables is enabled one frame late.
+
+**One frame late is invisible for `pressed` and fatal for `just_pressed`.** A level survives the
+delay; an edge is gone by the time the downstream system looks. Cost here: `FreeCamera`'s cursor
+grab hangs on `just_pressed`, so gating it from an unordered `PreUpdate` system left every
+`pressed`-driven behaviour — movement keys, run, wheel — working perfectly while mouse-look silently
+never engaged. No warning, and a diff that looks right. If a gate feeds a `just_pressed` consumer,
+order it after `InputSystems`.
+
 ## Gizmos
 
 Gizmo line width and depth bias are **per config group**, not per call, so a scene needing both thin

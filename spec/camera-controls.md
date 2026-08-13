@@ -49,7 +49,7 @@ terrain, a gameplay camera, and any in-app UI for the camera — there is nothin
 |---|---|
 | **Left click** | select a hexagon |
 | **Right drag** | fly: mouse looks, `WASD` moves, `E`/`Q` up and down, `Shift` runs, wheel changes speed |
-| **Middle drag**, or **Alt + left drag** | turn about the point under the cursor |
+| **Middle drag** | turn about the point under the cursor |
 | **Shift + middle drag** | pan |
 | **Wheel** | zoom towards the cursor |
 | **Escape** | quit |
@@ -67,12 +67,14 @@ also `FreeCamera`'s own default `mouse_key_cursor_grab`. The camera previously o
 right-drag, so orbiting had to move. Taking the widely-used binding for the widely-used meaning is
 worth more than preserving one project's habit, particularly for a debugging tool. Locked.
 
-**Turning moved to the middle button, with Alt+left as an alias.** Unity's orbit is `Alt`+left, and
-that is the natural pair to right-to-fly — but **i3 sets `floating_modifier Mod1`**, so `Alt`+drag
-is grabbed by the window manager before the app sees it, and this app auto-floats itself under i3
-whenever `HEX_TERRAIN_WINDOW` pins its size (see [[instrumentation]]). Middle-drag is Blender's
-binding, equally standard, and no window manager wants it. Decision: **both**, which costs one `||`
-— middle for the binding that always works, `Alt`+left for the muscle memory. Locked.
+**Turning is on the middle button, not Unity's `Alt`+left.** `Alt`+left is the natural pair to
+right-to-fly, and it was bound as an alias at first — but **i3 sets `floating_modifier Mod1`**, and
+it was then confirmed by hand that the drag never reaches the app. Not a quirk of this setup: `Alt`
+or `Super`+drag is the near-universal Linux window-move binding, so an application cannot rely on
+it. Middle-drag is Blender's binding, equally standard, and no window manager wants it. The alias
+was **removed** rather than left in place, along with the `Alt` guard it needed in
+`select_on_click` — a documented binding that silently does nothing is worse than one binding that
+works. Locked.
 
 **The pivot is latched at the press.** Re-picking it each frame as the cursor moves makes the pivot
 slide out from under the camera, and a rotation degrades into a slow crawl across the scene. One
@@ -122,6 +124,18 @@ flown. `fly_on_right_button` sets `FreeCameraState::enabled` from the right butt
 inert otherwise and releases the cursor grab for us. Two useful side effects: its `M` cursor-grab
 toggle and its Numpad axis snaps become unreachable, which is what a transient-only design wants.
 
+**Gating another plugin's systems has to be ordered against the input, not just against them.**
+`fly_on_right_button` was first registered as a bare `PreUpdate` system. `PreUpdate` is correct —
+`RunFixedMainLoop` follows it, so the controller sees the flag on the frame it is set — but systems
+within a schedule are unordered, so it could run *before* `bevy_input` had processed the frame's
+buttons and therefore read the previous frame's state. The controller was then enabled exactly one
+frame late, which is one frame too late for the `just_pressed` that its cursor grab hangs on.
+
+**The failure was quiet, and that is the part worth remembering.** Everything driven by `pressed`
+— `WASD`, `Q`/`E`, `Shift`, the wheel — worked perfectly; only mouse-look never engaged, because it
+is the one behaviour behind an edge rather than a level. Nothing warned, and it was found by a
+person flying the camera. `.after(InputSystems)` is the fix.
+
 **Yaw and pitch are re-seeded on the press.** `FreeCamera` latches its own `yaw`/`pitch` from the
 transform exactly once, on its first run. After a turn drag or a scripted pose its copy is stale and
 the view would jump back to it the moment the mouse moved. One re-seed at the press fixes it; there
@@ -152,18 +166,15 @@ All in `src/camera.rs` except the ray, which is `src/view/selection.rs`'s.
   roll however far round the view has been swung.
 - `Pivot(Vec3)` — a resource, latched at the press. Defaults to the origin, matching
   `Orbit::default().target`.
-- `fly_on_right_button` — registered in **`PreUpdate`**, deliberately: `FreeCameraPlugin` runs in
-  `RunFixedMainLoop`, which the schedule order puts *after* `PreUpdate` and *before* `Update`, so a
-  press is seen on the frame it happens rather than one late. It also zeroes the leftover velocity
-  on release, which would otherwise be re-applied as a lurch on the next press.
+- `fly_on_right_button` — registered as **`PreUpdate`, `.after(bevy::input::InputSystems)`**. Both
+  halves are load-bearing and one of them was got wrong first time; see below. It also zeroes the
+  leftover velocity on release, which would otherwise be re-applied as a lurch on the next press.
 - `parse_pose` — a preset name, `yaw,pitch,radius` in degrees about the origin, or
   `free:x,y,z@tx,ty,tz` in world units. See [[instrumentation]].
 - `view::selection::pick_surface` returns the hit **point** as well as the coord; `pick_point` adds
   the fallbacks — the grid plane beyond the grid's edge, then the previous pivot for a ray aimed at
   the sky. One ray routine serves both selection and the pivot rather than two that can disagree
   about what was hit.
-- `select_on_click` ignores a left press while `Alt` is held, since that press is the start of a
-  turn drag.
 
 Values, all in `src/camera.rs`: `LOOK_SENSITIVITY` 0.005 rad/px, `ZOOM_SENSITIVITY` 0.1 per notch,
 `MIN_RADIUS` 3, `MAX_RADIUS` 200, `PIXELS_PER_LINE` 50 (browsers report pixel deltas roughly 50×
@@ -195,18 +206,20 @@ Performed:
   which was not reachable at all before this change.
 - `cargo clippy --all-targets` — clean.
 
-**Not verified, and it must be done by hand** — [[scene]] already records that there is no
-key-injection tool here, so mouse and keyboard paths are covered by unit tests and inspection only.
-Anyone changing this code should re-check the feel:
+By hand, since there is no key-injection tool here ([[scene]] records the same limitation) — a
+person flew the camera and reported back:
 
-- Fly on right-drag: `WASD`/`QE`, `Shift` to run, wheel for speed; look **not inverted**; releasing
-  leaves the camera where it was flown to, and pressing again does not jump.
-- Middle-drag near a screen **corner**: the view must not snap. This is the single most likely thing
-  to be wrong, and a unit test can only pin the arithmetic, not the feel.
-- `Alt`+left-drag: whether i3 lets it through at all.
-- Shift+middle-drag pan tracks the ground under the cursor; wheel zoom converges on the cursor.
-- Left-click still selects; `Alt`+left does not change the selection.
-- The browser: whether right-button capture is usable, or raises the context menu on the canvas.
+- Middle-drag turn, Shift+middle-drag pan, wheel zoom and left-click selection all behave. The
+  snap-free turn about an off-centre pivot holds in practice, not only in the round-trip test.
+- Fly on right-drag: `WASD`, `Q`/`E`, `Shift` and wheel-for-speed all behave.
+- **`Alt`+left-drag never arrived**, as suspected. The alias was removed rather than documented.
+- **Mouse-look did not work at all**, which is what exposed the ordering bug above.
+
+Still outstanding:
+
+- Mouse-look after the ordering fix, and whether it feels un-inverted at the shipped sensitivity.
+- The browser: whether right-button capture is usable there, or raises the context menu on the
+  canvas.
 
 ## Implementation status
 

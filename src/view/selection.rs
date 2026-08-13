@@ -19,12 +19,8 @@ use crate::hex::{Axial, TerrainGrid};
 #[derive(Resource, Default, Debug, PartialEq)]
 pub struct Selected(pub Option<Axial>);
 
-// A system's parameters are the list of what it reads and writes, not an argument list a caller
-// has to get right, so the usual reason to keep them few does not apply.
-#[allow(clippy::too_many_arguments)]
 pub fn select_on_click(
     buttons: Res<ButtonInput<MouseButton>>,
-    keys: Res<ButtonInput<KeyCode>>,
     window: Single<&Window>,
     camera: Single<(&Camera, &GlobalTransform)>,
     layout: Res<HexLayout>,
@@ -39,12 +35,6 @@ pub fn select_on_click(
     // A click on the UI belongs to the UI: without this, pressing the button would also select
     // whatever hex happens to sit behind it.
     if hovered_ui.iter().any(|hovered| hovered.0) {
-        return;
-    }
-
-    // Alt+left starts the camera's turn drag. Without this, beginning one would also re-select
-    // whatever the pivot landed on.
-    if keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
         return;
     }
 

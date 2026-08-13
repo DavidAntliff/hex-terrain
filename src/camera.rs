@@ -1,4 +1,5 @@
-//! Camera controls: fly with the right button held, turn and pan about the point under the cursor.
+//! Camera controls: fly with the right button held, middle-drag to turn and pan about the point
+//! under the cursor.
 //!
 //! The `Transform` is the camera's state, and [`Orbit`] is read back out of it by [`rebase`] after
 //! every interaction. That is what lets flying and orbiting compose with no mode to switch between:
@@ -180,8 +181,8 @@ pub fn rebase(position: Vec3, target: Vec3) -> Orbit {
     }
 }
 
-/// Turn, pan and zoom about the pivot: middle-drag or Alt+left-drag turns, Shift+middle-drag pans,
-/// and the wheel zooms towards the cursor.
+/// Turn, pan and zoom about the pivot: middle-drag turns, Shift+middle-drag pans, and the wheel
+/// zooms towards the cursor.
 ///
 /// Writes the `Transform` only when something actually moved. That is what lets a scripted pose
 /// survive the frame it was set in, and what keeps this out of `FreeCamera`'s way.
@@ -205,23 +206,20 @@ pub fn orbit(
     }
     let (camera, projection, mut orbit, mut transform) = camera.into_inner();
 
-    let alt = keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]);
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     let middle = buttons.pressed(MouseButton::Middle);
     let notches = match scroll.unit {
         MouseScrollUnit::Line => scroll.delta.y,
         MouseScrollUnit::Pixel => scroll.delta.y / PIXELS_PER_LINE,
     };
-    let began = buttons.just_pressed(MouseButton::Middle)
-        || (alt && buttons.just_pressed(MouseButton::Left));
 
     // A drag takes its pivot once, at the press. A zoom takes a fresh one every time, which is what
     // makes the wheel converge on whatever the cursor is over rather than on the view centre.
-    if began || notches != 0.0 {
+    if buttons.just_pressed(MouseButton::Middle) || notches != 0.0 {
         pivot.0 = cursor_target(camera, &transform, &window, &layout, &grid, pivot.0);
     }
 
-    let turning = (middle && !shift) || (alt && buttons.pressed(MouseButton::Left));
+    let turning = middle && !shift;
     let panning = middle && shift;
     let delta = motion.delta;
 
@@ -313,8 +311,11 @@ fn cursor_target(
 /// exactly once, on its first run. After a turn or a scripted pose its own copy is stale, and the
 /// view would jump back to it the moment the mouse moved.
 ///
-/// Belongs in `PreUpdate`, ahead of the controller's own `RunFixedMainLoop` systems: the press has
-/// to be visible on the frame it happens, or the cursor grab is a frame late.
+/// **Registration is load-bearing in both directions**: `PreUpdate`, so this lands ahead of the
+/// controller's own `RunFixedMainLoop` systems, and `.after(InputSystems)`, so it reads this frame's
+/// buttons. Get the second wrong and the controller is enabled a frame late, which is exactly one
+/// frame too late for the `just_pressed` its cursor grab hangs on — and the failure is quiet, since
+/// everything driven by `pressed` still works and only mouse-look silently never engages.
 pub fn fly_on_right_button(
     buttons: Res<ButtonInput<MouseButton>>,
     camera: Single<(&Transform, &mut FreeCameraState)>,

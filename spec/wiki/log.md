@@ -454,6 +454,17 @@ app sees it. Middle-drag is Blender's binding and no WM wants it, so both are bo
 - Verified: 80 tests (was 75); `cargo clippy --all-targets` clean; wasm builds.
   `HEX_TERRAIN_CAMERA='iso;free:12,6,-12@0,0,0;free:2.5,1.2,2.5@0,0.3,0'` over `two-lakes` puts the
   camera at each eye point to float precision, the last standing between two prisms at ground level
-  — a view no three-number pose could reach. **The feel is unverified**: there is still no
-  key-injection tool, so the drags are covered by unit tests and inspection only, and the snap-free
-  turn near a screen corner in particular wants a human.
+  — a view no three-number pose could reach.
+
+**Hand-testing found what the tests could not, and the bug was a scheduling one.**
+`fly_on_right_button` was registered as a bare `PreUpdate` system. That schedule is right —
+`RunFixedMainLoop` follows it — but systems within a schedule are unordered, so it could run before
+`bevy_input` had processed the frame's buttons and read the previous frame's state instead. The
+controller was then enabled exactly one frame late, which is one frame too late for the
+`just_pressed` its cursor grab depends on.
+
+**The failure was silent and lopsided**: everything driven by `pressed` — `WASD`, `Q`/`E`, `Shift`,
+wheel-for-speed — worked perfectly, and only mouse-look never engaged, that being the one behaviour
+behind an edge rather than a level. Nothing warned. `.after(bevy::input::InputSystems)` is the fix,
+and the general rule — gate a `just_pressed` consumer and you must order against the input, not
+merely against the consumer — is now in [[bevy-0-19-api]].
