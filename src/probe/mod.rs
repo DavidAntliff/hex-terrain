@@ -152,7 +152,9 @@ fn parse_poses(spec: Option<&str>) -> Vec<(Option<Pose>, String)> {
             None => {
                 let names: Vec<&str> = crate::camera::pose_names().collect();
                 eprintln!(
-                    "unknown camera pose {:?}; one of: {}, or yaw,pitch,radius in degrees",
+                    "unknown camera pose {:?}; one of: {}, \
+                     or yaw,pitch,radius in degrees, \
+                     or free:x,y,z@tx,ty,tz in world units",
                     s.trim(),
                     names.join(", ")
                 );

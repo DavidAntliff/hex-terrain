@@ -151,7 +151,8 @@ orientation, and a second source of hex geometry competing with `corner_offsets`
 
 **Rejected: a skirt and an underside.** The surface is a bare shell: the grid's edge is a level lip
 with nothing beneath it. With back-face culling that means it is see-through from below, which the
-orbit camera can reach, and a raised rim cell shows sky underneath it at a low angle. Accepted
+camera can now reach outright rather than merely graze — [[camera-controls]] flies it under the grid
+— and a raised rim cell shows sky underneath it at a low angle. Accepted
 deliberately, in exchange for the geometry staying purely a function of the heights. A skirt down
 to a base elevation and a flat bottom would close it, at the cost of a base depth that is a fudge
 and a boundary case in every builder.

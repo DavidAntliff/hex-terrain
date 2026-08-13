@@ -1,19 +1,38 @@
 # hex-terrain
 
-A Bevy 0.19 sandbox: a hexagonal grid of terrain and water under a daylight sky, with an orbit
-camera. The grid is a hexagon of side 4 — 37 locations — addressable in axial, cube and doubled
-coordinates, following [Red Blob Games' hexagon guide](https://www.redblobgames.com/grids/hexagons/).
+A Bevy 0.19 sandbox: a hexagonal grid of terrain and water under a daylight sky, with editor-style
+camera controls. The grid is a hexagon of side 4 — 37 locations — addressable in axial, cube and
+doubled coordinates, following
+[Red Blob Games' hexagon guide](https://www.redblobgames.com/grids/hexagons/).
 
 The sky is generated at startup from an analytic daylight model, and also lights the scene — so
 there is no sky asset to fetch and a fresh clone runs as-is.
 
 Design notes and accumulated knowledge live in `spec/` — start at `spec/home.md`.
 
-- **Right-drag** to orbit, **scroll** to zoom, **left-click** to select a hexagon, **Escape** to quit.
-- The panel top right reports the selected hexagon in axial, cube and doubled coordinates plus world
-  position, and carries five controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
-  pointy-top against flat-top, show or hide the axis compass, move the sea level, and reset the view
-  to look straight down with everything in frame.
+## Controls
+
+The scene-view scheme every 3D editor uses. There are no camera modes: a button is held or it is
+not.
+
+| Input                                    | Action                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------ |
+| **Left click**                           | Select a hexagon.                                                        |
+| **Right drag**                           | Fly. Mouse looks, `WASD` moves, `E`/`Q` up and down, `Shift` runs, the wheel changes speed. |
+| **Middle drag**, or **Alt + left drag**  | Turn about the point under the cursor.                                   |
+| **Shift + middle drag**                  | Pan.                                                                     |
+| **Wheel**                                | Zoom towards the cursor.                                                 |
+| **Escape**                               | Quit.                                                                    |
+
+Middle-drag and Alt+left-drag do the same thing on purpose: `Alt` is the Unity binding, but i3 and
+most Linux window managers grab `Alt`+drag before the app sees it.
+
+The panel top right reports the selected hexagon in axial, cube and doubled coordinates plus world
+position, and carries five controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
+pointy-top against flat-top, show or hide the axis compass, move the sea level, and reset the view
+to look straight down with everything in frame.
+
+See `spec/camera-controls.md` for why the bindings are these ones.
 
 ## Driving it from a script
 
@@ -34,9 +53,16 @@ optional and off by default, so a plain `cargo run` is unaffected.
 | `HEX_TERRAIN_INTERVAL`   | `<frames>x<count>`       | Capture `count` times per pose, `frames` apart. |
 | `HEX_TERRAIN_WINDOW`     | `<W>x<H>`                | Pins the window size, in logical pixels.        |
 
-A pose is a preset — `top`, `iso`, `low`, or `fit` (framed on the whole scene) — or
-`yaw,pitch,radius` in degrees, degrees and world units. With more than one capture an index goes in
-before the extension (`/tmp/s-00.png`, `-01`, …); a single capture writes exactly the path given.
+A pose is one of three things:
+
+- a preset — `top`, `iso`, `low`, or `fit` (framed on the whole scene);
+- `yaw,pitch,radius` in degrees, degrees and world units, about the origin;
+- `free:x,y,z@tx,ty,tz` — an eye point and what it looks at, in world units. This is how to reach a
+  view from inside the scene, which no orbit angle can: `free:2.5,1.2,2.5@0,0.3,0` stands between
+  the prisms at ground level.
+
+With more than one capture an index goes in before the extension (`/tmp/s-00.png`, `-01`, …); a
+single capture writes exactly the path given.
 
 The report says what a picture cannot: the pose actually used, the window really rendered, mesh and
 vertex counts per kind, the model's heights and water levels, and the frame rate. It is also the

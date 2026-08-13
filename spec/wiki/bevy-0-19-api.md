@@ -137,9 +137,44 @@ natively and is unusable on the web.
 ## Camera controllers
 
 0.19 ships first-party controllers in `bevy_camera_controller`, feature-gated as `free_camera`
-and `pan_camera`. **Neither orbits a fixed target**, so an orbit camera is still hand-written.
-The crate's own docs suggest copying a controller and modifying it when the provided behaviour
-doesn't fit.
+and `pan_camera`. **Neither orbits a target**, so an orbit camera is still hand-written. The
+crate's own docs suggest copying a controller and modifying it when the provided behaviour
+doesn't fit. `pan_camera` is 2D only — `PanCamera` goes on a `Camera2d`.
+
+Enabling either is `features = ["free_camera"]` on the `bevy` dependency, and `bevy` re-exports it
+as `bevy::camera_controller::free_camera`. The `bevy_camera_controller` crate is not vendored into
+the cargo registry until the feature is switched on, so its source cannot be read beforehand — until
+then `examples/camera/free_camera_controller.rs` in the `bevy` crate is the only local
+documentation, and it does not show the whole component.
+
+**`FreeCamera` holds the settings, `FreeCameraState` the runtime state**, the latter a required
+component of the former. Defaults: `WASD` to move, `E`/`Q` up and down (world axes, per
+`VerticalMovementAxis::World`), `ShiftLeft` to run, **`MouseButton::Right` to grab the cursor while
+held**, `KeyM` to toggle the grab, `Numpad1`/`3`/`7` (with `ControlLeft` reversing) to snap to an
+axis, and the wheel scaling `speed_multiplier` exponentially. `walk_speed` 5.0 and `run_speed` 15.0
+are world units per second, which is quick for a scene a few units across. Mouse look is
+**non-inverted** as shipped: `pitch -= delta.y * …`, so moving the mouse forward looks up.
+
+Three behaviours worth knowing before wiring it up, all read out of
+`bevy_camera_controller-0.19.0/src/free_camera.rs`:
+
+- **Scroll is consumed unconditionally.** `state.speed_multiplier *= exp(scroll_factor * scroll)`
+  runs whether or not the cursor is grabbed, so a controller left enabled quietly ramps its fly
+  speed while the wheel is doing something else entirely. `scroll_factor: 0.0` disables that, or
+  gate the whole controller.
+- **`FreeCameraState::enabled` is a clean off switch.** The system early-returns on it *after*
+  releasing the cursor grab, and before reading scroll, keys or motion — so everything past that
+  point, including the `KeyM` toggle and the Numpad snaps, is unreachable while it is false.
+- **`yaw`/`pitch` are latched from the transform exactly once**, guarded by a private `initialized`
+  flag on the first run. Move the camera by any other means afterwards and the controller's copy is
+  stale, so the view jumps back to it on the next mouse motion. Both fields are `pub`, so re-seeding
+  them from `transform.rotation.to_euler(EulerRot::YXZ)` is the fix.
+
+**`FreeCameraPlugin` schedules its systems in `RunFixedMainLoop`**, not `Update`. The main schedule
+order is `First → PreUpdate → RunFixedMainLoop → Update → SpawnScene → PostUpdate → Last`
+(`bevy_app/src/main_schedule.rs`, `MainScheduleOrder::default`), so a system that must influence the
+controller on the same frame as an input edge belongs in **`PreUpdate`** — from `Update` it is
+always a frame late.
 
 ## Gizmos
 

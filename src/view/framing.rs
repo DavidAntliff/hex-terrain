@@ -83,6 +83,9 @@ pub fn reset_view(
     let half_extent = content_half_extent(&layout, grid.coords(), show_compass.0);
     orbit.yaw = 0.0;
     orbit.pitch = TOP_DOWN_PITCH;
+    // Back to the origin, wherever a pan or a flight has left the camera: `content_half_extent`
+    // measures the grid symmetrically about `layout.origin`, so that is the point it frames.
+    orbit.target = Vec3::ZERO;
     orbit.radius = framing_distance(half_extent, perspective.fov, perspective.aspect_ratio)
         .clamp(MIN_RADIUS, MAX_RADIUS);
 

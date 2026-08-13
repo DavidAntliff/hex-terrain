@@ -376,3 +376,61 @@ actually rendered — so comparability is checkable instead of assumed. Recorded
 - New spec [[instrumentation]]. [[scene]] edited by agreement in two places: the screenshot mechanism
   is now a pointer, and its "one dependency" constraint is scoped to the shell with the serde
   exemption named.
+
+## [2026-08-13] feature | editor-style camera controls
+
+- New spec [[camera-controls]], promoted out of [[scene]], which had carried the camera since the
+  tree was created and had a stub in [[home]] anticipating exactly this. Right-drag flies
+  (`WASD`/`QE`, `Shift` to run), middle-drag or `Alt`+left-drag turns about the point under the
+  cursor, `Shift`+middle-drag pans, the wheel zooms towards the cursor. Left-click still selects.
+
+**No camera mode, and that is the whole design.** The change was asked for as a free camera plus a
+UI toggle between it and the orbit camera. Both were dropped: with the pivot design below the two
+are the *same* camera differing only in which button is down, so a mode would have been a state
+variable with no state in it, plus a widget and a class of "why won't it move" bugs. Right-drag had
+to give up orbiting to become the fly button, which is what Unity, Godot and Unreal all bind it to
+— and what `FreeCamera` already defaults to.
+
+**`rebase` is a read-back, not a write-back** — the load-bearing decision. Deriving
+`yaw`/`pitch`/`radius` about the new pivot and writing `place()` is the obvious implementation and
+it is wrong: `place` points the camera *at* its target, so the view **snaps** whenever the pivot is
+off centre, which with a cursor-picked pivot is most of the time and near a screen edge is tens of
+degrees. Instead `turn_about` rotates position and orientation about the pivot together, and `Orbit`
+is read back out afterwards. Being the exact inverse of `place`'s translation, it clamps nothing —
+a lossy inverse would leave the report disagreeing with the camera, and a flight can genuinely end
+up beyond `MAX_RADIUS`. A round-trip test pins it.
+
+**Two traps, both caught by a test rather than by reading.**
+
+- The pitch limit cannot test *how steep the view is*: past the pole the view is equally steep, so
+  the check passes and the horizon lands upside down. It has to test whether the *step* would put
+  the camera's up vector below the horizon.
+- `FreeCamera` latches its own `yaw`/`pitch` from the transform exactly once, and consumes scroll
+  whether or not the cursor is grabbed. Gating `FreeCameraState::enabled` on the right button fixes
+  the second and kills the `M` toggle and Numpad snaps for free; re-seeding yaw/pitch at the press
+  fixes the first. The gate must be in `PreUpdate` — `FreeCameraPlugin` runs in `RunFixedMainLoop`,
+  which precedes `Update`, so from `Update` the press is always a frame late. All in
+  [[bevy-0-19-api]].
+
+**`Alt`+left-drag alone was not viable**: i3 sets `floating_modifier Mod1`, and this app auto-floats
+itself whenever `HEX_TERRAIN_WINDOW` pins its size, so the window manager eats the drag before the
+app sees it. Middle-drag is Blender's binding and no WM wants it, so both are bound — one `||`.
+
+- `free_camera` is a **Bevy feature**, not a third-party crate, so [[scene]]'s one-dependency
+  constraint holds unchanged; that page's note recording the built-in controllers as rejected was
+  correct only for orbiting a target, which is still hand-written. The crate is not vendored into
+  the cargo registry until the feature is enabled, so its source cannot be read in advance.
+- `HEX_TERRAIN_CAMERA` gained `free:x,y,z@tx,ty,tz`. It resolves through `rebase` into an ordinary
+  `Orbit`, so `Pose` gained no variant, `place` gained no branch and the probe's aiming code was
+  untouched — and it inherits `place`'s definition at the poles, which is what a hand-written eye
+  point usually wants. The report's `camera` block gained `target`, without which the spherical
+  fields no longer say where the camera is. [[instrumentation]] amended by agreement: its "a pose is
+  exactly three numbers" constraint was the third place orbit-around-origin was locked in.
+- `pick_surface` now returns the hit point as well as the coord, so selection and the camera pivot
+  share one ray routine rather than two that can disagree about what was hit.
+- Verified: 80 tests (was 75); `cargo clippy --all-targets` clean; wasm builds.
+  `HEX_TERRAIN_CAMERA='iso;free:12,6,-12@0,0,0;free:2.5,1.2,2.5@0,0.3,0'` over `two-lakes` puts the
+  camera at each eye point to float precision, the last standing between two prisms at ground level
+  — a view no three-number pose could reach. **The feel is unverified**: there is still no
+  key-injection tool, so the drags are covered by unit tests and inspection only, and the snap-free
+  turn near a screen corner in particular wants a human.

@@ -1,8 +1,9 @@
 //! A hex grid to iterate terrain work in: a side-4 hexagon of locations under a daylight sky, with
-//! an orbit camera, click selection and coordinate labels.
+//! editor-style camera controls, click selection and coordinate labels.
 
 use bevy::{
     camera::Exposure,
+    camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     light::{
         light_consts::lux, CascadeShadowConfig, CascadeShadowConfigBuilder, EnvironmentMapLight,
         Skybox,
@@ -46,10 +47,16 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins((HexViewPlugin, ProbePlugin))
+        // `FreeCameraPlugin` is what flies the camera while the right button is held; the rest of
+        // the controls are `camera::orbit`'s. See spec/camera-controls.md.
+        .add_plugins((HexViewPlugin, ProbePlugin, FreeCameraPlugin))
         .insert_resource(HexLayout::pointy(HEX_SCALE).with_height_scale(HEIGHT_SCALE))
         .insert_resource(GridModel(grid))
+        .init_resource::<camera::Pivot>()
         .add_systems(Startup, setup)
+        // Ahead of `FreeCameraPlugin`'s own systems, which run in `RunFixedMainLoop`: the right
+        // button has to be seen on the frame it goes down or the cursor grab is late.
+        .add_systems(PreUpdate, camera::fly_on_right_button)
         .add_systems(Update, (camera::orbit, exit_on_escape))
         .run();
 }
@@ -181,6 +188,14 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
             ..EnvironmentMapLight::hemispherical_gradient(&mut images, zenith, horizon, ground)
         },
         orbit,
+        // Speeds are world units per second, and the grid is only about seven units across, so
+        // the controller's defaults of 5 and 15 cross the whole scene in under a second. The
+        // wheel scales both while flying, so these are a starting point rather than a limit.
+        FreeCamera {
+            walk_speed: 3.0,
+            run_speed: 9.0,
+            ..default()
+        },
     ));
 }
 

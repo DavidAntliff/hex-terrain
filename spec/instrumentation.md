@@ -34,7 +34,10 @@ The two failures this exists to prevent, both previously real:
   `std::env::var` compiles there and returns `Err`, so the whole mechanism self-disables.
 - **Env vars configure a mode; argv picks what to run.** [[scene]] reasons this out for the scene
   name. Aim, capture and report are modes, so all are variables.
-- **The camera orbits the origin only.** A pose is therefore exactly three numbers.
+- **A pose says where the camera is, in the terms it is steered in.** This was once "the camera
+  orbits the origin only, so a pose is exactly three numbers"; [[camera-controls]] gave the camera a
+  target and the run of the scene, so the free form was added beside the three-number one rather
+  than replacing it. Both resolve to the same `Orbit`.
 - **Existing invocations keep working.** `HEX_TERRAIN_SCREENSHOT=<path>` alone must still write
   exactly that path, with no index inserted.
 - **No CLI crate.** Parsing stays hand-rolled; see Design discussion.
@@ -53,6 +56,21 @@ any in-app UI for any of this.
 actually asked for, and `yaw,pitch,radius` in degrees covers the rest. Names because the common
 request is "show me it from above", not a triple; numbers because a fixed table cannot reach an
 arbitrary angle. Both are ten lines. Locked.
+
+**A third form, `free:x,y,z@tx,ty,tz`, for an eye that is not orbiting the origin.** Once the camera
+could be flown anywhere ([[camera-controls]]), the interesting views — standing between two prisms,
+at a shoreline, under an overhang — were not reachable by any triple of orbit angles. An eye point
+and a look-at point name them directly.
+
+Prefixed rather than "six numbers means free": the three-number form's whole safety property is that
+a miscounted field is rejected rather than silently reinterpreted, and overloading the field count
+would give that up. The `@` reads naturally in a shell and cannot collide with `,` (field separator)
+or `;` (pose separator).
+
+It resolves through `camera::rebase` into an ordinary `Orbit`, so it is **not a second kind of
+pose**: `Pose` gains no variant, `place` gains no branch, the aiming code here is untouched, and it
+inherits `place`'s definition at the poles — which is exactly what `free:0,10,0@0,0,0` asks for.
+Locked.
 
 **Angles are degrees at the boundary, radians inside.** The conversion happens once in
 `parse_pose`, so `place()` and every existing caller keep working in radians and nothing else in the
@@ -127,6 +145,10 @@ than the scene. Two things had to be true for the pin to hold, and a third could
   message. `PRESETS` is a `&[(&str, f32, f32, f32)]` table in degrees, following the `scenes::SCENES`
   idiom.
 - `iso` restates `Orbit::default()` in degrees, so a test pins the two together.
+- `free:x,y,z@tx,ty,tz` goes through `camera::rebase`, which is why it needs no `Pose` variant. Both
+  halves are parsed by the same `triple` helper as the orbit form, so all three forms reject a
+  miscounted field identically.
+- The rejection message names all three forms, not just the presets.
 
 `src/probe/mod.rs` — the plugin and the sequencer:
 
@@ -152,6 +174,10 @@ than the scene. Two things had to be true for the pin to hold, and a third could
 diagnostics }`, `ReportSources` as a `SystemParam` gathering what it reads, and `Report::collect`.
 Load-bearing details:
 
+- `camera` carries `target` beside `yaw_deg`/`pitch_deg`/`radius`. Those three are relative to the
+  target, which is no longer always the origin — without it they do not say where the camera is.
+  They stay meaningful after a flight because [[camera-controls]] reads `Orbit` back out of the
+  transform rather than driving the transform from it.
 - `render` separates `cells` / `walls` / `water`, each `{ entities, vertices, triangles }`.
   **`entities` is what separates "nothing was spawned" from "something was spawned and it is
   empty"** — different bugs that look identical in a PNG. Triangles come from the index buffer where
@@ -171,6 +197,9 @@ The interface, all optional:
 | Variable | Value | Effect |
 |---|---|---|
 | `HEX_TERRAIN_CAMERA` | `;`-separated poses | Aims the camera; one capture per pose. |
+| | `top` \| `iso` \| `low` \| `fit` | A preset. |
+| | `yaw,pitch,radius` | Degrees, degrees, world units, about the origin. |
+| | `free:x,y,z@tx,ty,tz` | An eye point and what it looks at, in world units. |
 | `HEX_TERRAIN_SCREENSHOT` | path | A PNG per capture. |
 | `HEX_TERRAIN_REPORT` | path, or `-` for stdout | A JSON report per capture. |
 | `HEX_TERRAIN_INTERVAL` | `<frames>x<count>` | Capture `count` times per pose, `frames` apart. |
@@ -180,7 +209,7 @@ The interface, all optional:
 
 Performed.
 
-`cargo test` — 75 tests, up from 66. The nine new ones are pure, with no `App`:
+`cargo test` — 80 tests. The pose tests are pure, with no `App`:
 
 - Every name `pose_names()` advertises parses; `fit` reaches `Pose::Fit`; case and surrounding space
   are tolerated, both being easy to introduce from a shell.
@@ -188,7 +217,11 @@ Performed.
 - `top` is exactly `TOP_DOWN_PITCH`, the pole `place` is built to survive.
 - `iso` agrees with `Orbit::default()`, so the table cannot drift from the view the app opens with.
 - Pitch and radius clamp at both ends; yaw does not clamp, being an angle about a full circle.
-- Garbage returns `None`, including the two-field, four-field and empty cases.
+- Garbage returns `None`, including the two-field, four-field and empty cases, and every way the
+  `free:` form can be mis-written — missing `@`, too few or too many fields either side, unparseable
+  numbers, and the bare prefix.
+- A free pose puts the camera at the eye point it names and points it at the target it names,
+  including straight down.
 - `indexed_path` puts the index before the extension, and appends where there is no extension, where
   the only dot is in a directory earlier in the path, and for a dotfile.
 - `parse_interval` defaults to one capture, tolerates spacing and case, and floors the count at 1.
@@ -198,6 +231,10 @@ Native runs, on Vulkan (RTX 3050, driver 580.142), i3:
 
 - `HEX_TERRAIN_CAMERA='top;iso;low;fit'` with screenshot and report over `two-lakes` — four PNGs and
   four reports; each report's `camera` matches the pose that produced it (90°/51.57°/8°/90°), all
+  — and, for the free form, `HEX_TERRAIN_CAMERA='iso;free:12,6,-12@0,0,0;free:2.5,1.2,2.5@0,0.3,0'`
+  over the same scene: reported `translation` matches each requested eye point to float precision,
+  `target` matches, and the third image is a view from ground level between two prisms, which no
+  three-number pose could reach. All
   four pass `python3 -m json.tool`. `top` shows both lakes from overhead; `low` gives the grazing
   view of the horizon haze — **the view that previously required editing the default in source**.
 - `HEX_TERRAIN_REPORT=-` over `terraces` — two JSON Lines records, each independently parseable,
@@ -241,6 +278,7 @@ rather than surprising.
 
 ## Related
 
+- [[camera-controls]]: what a pose aims, and where `rebase` — which the free form resolves through — lives
 - [[scene]]: the shell this instruments, and where the screenshot mechanism used to be specified
 - [[bevy-0-19-api]]: the window-sizing and query-conflict facts this relies on
 - [[hex-grid]]: the debug panel, which is the interactive counterpart to the report
