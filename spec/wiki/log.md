@@ -721,3 +721,39 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   perturbation on top of it moves a further 15.3% at a median of 7. **Not verified:** a browser on
   WebGL2, still deferred to the end — and `#ifdef VERTEX_COLORS` selecting the wall path inside a
   material extension is exactly the kind of thing that could translate differently there.
+
+## [2026-08-14] feature | the normal follows the noise, and a shared build directory bites
+
+- **Tilting the normal by the tint field's slope is the largest single gain of the five steps.** A
+  cap is a flat plate and reads as one under a directional light however its colour varies; once the
+  normal follows the same field that tinted it, a dip is darker *and* faces differently, which is
+  what the eye reads as texture rather than as a stain. Forward differences, so three extra noise
+  evaluations rather than the six a central difference costs — the half-step bias that buys is
+  meaningless when there is no true surface being approximated, only a field being borrowed.
+- **The gradient is projected onto the surface before it tilts anything.** [[water]] can treat the
+  world axes as its tangent frame because a plate is always level; nothing on the terrain can, and
+  `GridPlane` means the grid does not have to lie in the same plane from one run to the next.
+  Removing the component along `N` is what makes one function serve caps and walls alike.
+- **The sample step wanted to be *smaller*, which was the opposite of the guess.** Reasoning that a
+  step of 0.02 noise units is about three pixels and therefore "sub-pixel noise", it was swept
+  against 0.06 and 0.14. Measured against a bump-free frame, 0.02 changed 50.7% of the terrain at a
+  median of 6 levels of 255, against 43.5%/5 and 31.0%/4. The finest octaves are what read as a
+  surface; the broad tilt is what reads as nothing.
+- **It fades with distance**, the same guard [[water]] puts on its ripples and for the same recorded
+  reason: below a pixel the pattern becomes crawling shimmer, and from any altitude most of the
+  terrain on screen is past that point. Not verified in motion — the captures are still frames.
+- **The build directory is shared between worktrees, and that can serve the wrong binary.**
+  `.cargo/config.toml` points every worktree at `~/.cargo/hex-terrain-build`; see
+  [[build-performance]]. After an accidental `cargo run` from the primary checkout, `cargo run` in a
+  worktree reported `Finished` in 0.24s and then ran a binary that **rejected a scene the worktree's
+  own source defines** — `--scene biomes` came back "possible values: sea, two-lakes, terraces".
+  `touch`ing a source file and rebuilding fixed it. The symptom to watch for is a build that finishes
+  suspiciously fast after changing only assets, and the cheap guard is to assert the screenshot
+  actually appeared rather than trusting the run.
+- **This is the likeliest explanation for the phantom measurement in the previous entry**, where a
+  control frame differed from every other by 173 of 255 for no reason the code could account for.
+  Recorded as likely rather than proven: the frame was not kept and the state cannot be reproduced.
+- Verified: 100 tests, `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`. Frame rate is vsync-capped at 60 both with and without the bump, so that
+  only shows the three extra noise evaluations do not breach 60 at this scene size — it is not a
+  measurement of their cost.

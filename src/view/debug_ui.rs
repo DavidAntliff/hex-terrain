@@ -1,10 +1,10 @@
 //! Top-right readout for the selected hex, and the controls that drive the view.
 //!
-//! Fourteen controls: a button cycling the label mode (including off), a button toggling the hexagon
+//! Fifteen controls: a button cycling the label mode (including off), a button toggling the hexagon
 //! orientation, checkboxes for the compass and for hiding the terrain's skirt, sliders for the sea
 //! level, the cap inset, the shoreline, the snow line, the two tint knobs, the slope rock takes
-//! over at and the two that shape the blend between biomes, and a button that frames the whole
-//! scene from overhead. The state-carrying buttons cycle rather than offering radio
+//! over at, the two that shape the blend between biomes and the bump, and a button that frames
+//! the whole scene from overhead. The state-carrying buttons cycle rather than offering radio
 //! lists, because this is a debug panel and a cycle is one entity and one observer arm.
 
 use bevy::prelude::*;
@@ -62,6 +62,10 @@ const ROCK_ONSET_RANGE: std::ops::RangeInclusive<f32> = 0.0..=1.0;
 const BLEND_NOISE_RANGE: std::ops::RangeInclusive<f32> = 0.0..=1.5;
 const BLEND_SHARPNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=6.0;
 
+/// How hard the tint field's slope tilts the normal. The gradient of a field with six octaves is
+/// steep, so useful values are small and the top of this track is already past caricature.
+const BUMP_RANGE: std::ops::RangeInclusive<f32> = 0.0..=0.4;
+
 /// The thumb's width as a percentage of the track, kept out of the travel so it cannot overhang
 /// either end.
 const THUMB_WIDTH: f32 = 9.0;
@@ -92,6 +96,7 @@ pub enum Control {
     RockOnset,
     BlendNoise,
     BlendSharpness,
+    Bump,
     ResetView,
 }
 
@@ -211,6 +216,13 @@ pub fn spawn_debug_ui(
                 look.0.blend_sharpness,
                 BLEND_SHARPNESS_RANGE,
                 blend_sharpness_caption(look.0.blend_sharpness),
+            );
+            spawn_slider(
+                panel,
+                Control::Bump,
+                look.0.bump,
+                BUMP_RANGE,
+                bump_caption(look.0.bump),
             );
             spawn_button(panel, Control::ResetView, RESET_CAPTION.to_string());
         });
@@ -369,6 +381,10 @@ fn blend_sharpness_caption(sharpness: f32) -> String {
     format!("blend edge: {sharpness:.1}")
 }
 
+fn bump_caption(bump: f32) -> String {
+    format!("bump: {:.0}%", bump * 100.0)
+}
+
 fn rock_onset_caption(onset: f32) -> String {
     let degrees = (1.0 - onset).clamp(-1.0, 1.0).acos().to_degrees();
     format!("rock above: {degrees:.0}\u{b0}")
@@ -463,6 +479,7 @@ pub fn on_slider_changed(
         Ok(Control::BlendSharpness) if look.0.blend_sharpness != change.value => {
             look.0.blend_sharpness = change.value
         }
+        Ok(Control::Bump) if look.0.bump != change.value => look.0.bump = change.value,
         _ => {}
     }
 }
@@ -506,6 +523,7 @@ pub fn update_captions(
             Control::RockOnset => rock_onset_caption(look.0.rock_onset),
             Control::BlendNoise => blend_noise_caption(look.0.blend_noise),
             Control::BlendSharpness => blend_sharpness_caption(look.0.blend_sharpness),
+            Control::Bump => bump_caption(look.0.bump),
             Control::ResetView => RESET_CAPTION.to_string(),
         };
     }

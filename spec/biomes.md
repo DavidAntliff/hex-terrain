@@ -273,7 +273,14 @@ started. No divergence known.
   it joins, and what makes it read darker is the tilt of its normal, which the renderer already
   does. Measured on `biomes`, the blend moves 28% of the visible terrain at a median of 10 levels of
   255, and the perturbation a further 15% at a median of 7.
-- **Step 5**: normal perturbation. Not started.
+- **Step 5, normal perturbation: done, and the largest single gain of the five.** The tint field's
+  slope, found by forward differences, tilts the normal; the gradient is projected onto the surface
+  first so it works on a wall as well as a level cap and needs to know nothing about which plane the
+  grid lies in. It fades with distance for the reason [[water]] fades its ripples — detail finer than
+  a pixel is shimmer rather than texture. Measured on `biomes` against the same frame with the bump
+  at zero: half the visible terrain changes, and the local luminance variation within a face rises
+  from 19.4 to 20.7. The sample step matters and the intuition was backwards: **0.02 beat 0.06 and
+  0.14**, because it is the finest octaves that read as a surface, not the broad tilt.
 - **Not verified anywhere yet**: the shader in a browser on WebGL2, which per the constraints above
   is the only check that proves the WGSL translates. Deferred to the end of the procedural work
   rather than repeated per step.

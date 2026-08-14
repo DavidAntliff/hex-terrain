@@ -1,9 +1,10 @@
 // Terrain: a biome's flat colour, weathered into something that reads as ground.
 //
 // An extension to the standard material rather than a material of its own, so the lighting, the
-// shadows and the environment reflection all come from stock PBR. Three things the material cannot
-// know are supplied here: that two caps of the same biome should not be the same colour, and that a
-// steep enough face is bare rock whatever grows on the flat ground above it.
+// shadows and the environment reflection all come from stock PBR. What the material cannot know is
+// supplied here: that a wall spans up to three biomes and has to mix them, that a steep enough face
+// is bare rock whatever grows on the flat ground above it, that two caps of one biome should not be
+// the same colour, and that a cap is not the flat plate its geometry says it is.
 //
 // The noise is a function of the **world position**, not of position within a cell, which is the
 // whole point — anything keyed to the cell would repeat with the lattice and read as tiles no
@@ -12,6 +13,7 @@
 // which plane the grid lies in.
 
 #import bevy_pbr::{
+    mesh_view_bindings::view,
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, apply_pbr_lighting, main_pass_post_lighting_processing},
     forward_io::{VertexOutput, FragmentOutput},
@@ -41,6 +43,8 @@ struct TerrainSettings {
     // exponent the weights are raised to before being normalised again.
     blend_noise: f32,
     blend_sharpness: f32,
+    // How hard the tint field's slope tilts the normal. Zero leaves the geometry's own normal.
+    bump: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainSettings;
@@ -168,6 +172,42 @@ fn blend(world_position: vec3<f32>, weights: vec3<f32>, ids: vec3<u32>) -> vec3<
         + w.z * terrain.palette[ids.z].rgb;
 }
 
+// How far apart the noise is sampled to find its slope, in the same units `fbm` is evaluated in.
+//
+// Small, because what makes a surface look rough is the *finest* detail in the field, and a wide
+// sample steps straight over it and returns only the broad tilt. This is about the size of the
+// last octave, which is where the useful bumps are.
+const SLOPE_STEP: f32 = 0.02;
+
+// The distance at which the bump has faded to half strength, in world units.
+//
+// The same guard `water.wgsl` puts on its ripples, and for the same reason: a bump smaller than a
+// pixel stops being texture and becomes crawling shimmer, and from any altitude most of the terrain
+// on screen is past that point. Trading the detail away with distance keeps what actually reads at
+// that range, which is the broad shading rather than the grain.
+const BUMP_FADE: f32 = 12.0;
+
+// The normal, tilted by the slope of the tint field.
+//
+// Forward differences, so three extra evaluations rather than the six a central difference costs.
+// The half-step bias that buys is meaningless here: there is no true surface being approximated,
+// only a field being borrowed, and a bias is indistinguishable from having sampled elsewhere.
+//
+// The gradient is projected onto the surface — its component along `n` removed — before it tilts
+// anything, which is what lets this work on a wall as well as on a level cap. `water.wgsl` can
+// treat the world axes as its tangent frame because a plate is always level; nothing here can, and
+// the grid does not even have to lie in the same plane from one run to the next.
+fn rumpled(n: vec3<f32>, p: vec3<f32>, height: f32, strength: f32) -> vec3<f32> {
+    let gradient = vec3(
+        fbm(p + vec3(SLOPE_STEP, 0.0, 0.0)) - height,
+        fbm(p + vec3(0.0, SLOPE_STEP, 0.0)) - height,
+        fbm(p + vec3(0.0, 0.0, SLOPE_STEP)) - height,
+    ) / SLOPE_STEP;
+    let across = gradient - n * dot(gradient, n);
+    // Away from the slope: a surface rising to the right faces left.
+    return normalize(n - across * strength);
+}
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
@@ -201,10 +241,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // Multiplicative, and in linear space, so the material's hue survives and only its brightness
     // moves. Mixing towards a second colour instead would make everything drift towards that one
     // colour wherever the noise is high.
-    let n = fbm(in.world_position.xyz / terrain.tint_wavelength);
+    let q = in.world_position.xyz / terrain.tint_wavelength;
+    let n = fbm(q);
     let swing = clamp((n - 0.5) * 2.0 / SWING_PER_AMPLITUDE, -1.0, 1.0);
     let tint = 1.0 + swing * terrain.tint_amplitude;
     pbr_input.material.base_color = vec4(material * tint, base.a);
+
+    // Last, and after everything that reads the geometric normal. A cap is a flat plate and reads
+    // as one under a directional light however its colour varies; tilting the normal by the slope
+    // of the same field that tinted it is what makes the two agree — a dip is darker *and* faces
+    // differently, which is what the eye reads as texture rather than as a stain.
+    let range = length(view.world_position.xyz - in.world_position.xyz);
+    pbr_input.N = rumpled(pbr_input.N, q, n, terrain.bump * BUMP_FADE / (BUMP_FADE + range));
 
     pbr_input.material.base_color =
         alpha_discard(pbr_input.material, pbr_input.material.base_color);

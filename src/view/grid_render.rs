@@ -210,6 +210,9 @@ pub struct TerrainSettings {
     /// The exponent the weights are raised to before they are normalised. One leaves the ramp
     /// linear; larger narrows the band over which two biomes are genuinely mixed.
     pub blend_sharpness: f32,
+    /// How hard the tint field's slope tilts the normal. Zero leaves the geometry's own normal, and
+    /// a cap goes back to being a flat plate.
+    pub bump: f32,
 }
 
 /// The material extension. Bindings start at 100 because 0-99 belong to the base material.
@@ -242,6 +245,7 @@ impl Default for TerrainLook {
             }),
             blend_noise: 0.55,
             blend_sharpness: 2.2,
+            bump: 0.25,
             rock: Vec3::new(ROCK_FACE.red, ROCK_FACE.green, ROCK_FACE.blue),
             // Overwritten from the layout before it ever reaches a material; this is only what the
             // struct holds until `spawn_grid` runs.
