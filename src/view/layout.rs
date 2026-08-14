@@ -97,7 +97,7 @@ impl GridPlane {
 
 /// How far each cap is shrunk towards its centre, as a fraction of the circumradius, before
 /// anything says otherwise.
-pub const DEFAULT_INSET: f32 = 0.08;
+pub const DEFAULT_INSET: f32 = 0.25;
 
 /// Projects hex coordinates into world space.
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]

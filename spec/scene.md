@@ -240,7 +240,7 @@ Performed:
 - The argv rule — `cargo test the_inset` runs one test and does not exit the harness, which is the
   failure the `try_parse_from` discipline exists to prevent.
 - `--inset` reaches the geometry — with `HEX_TERRAIN_REPORT`, `layout.inset` reads `0.25` for
-  `--inset 25` and `0.08` with the flag absent, and `run.scene` reads `two-lakes` rather than the
+  `--inset 25` and `DEFAULT_INSET` with the flag absent, and `run.scene` reads `two-lakes` rather than the
   first argv word. Screenshots at both values show caps, walls, skirts and outlines moving
   together.
 
