@@ -1,11 +1,12 @@
 //! Top-right readout for the selected hex, and the controls that drive the view.
 //!
-//! Seven controls: a button cycling the label mode (including off), a button toggling the hexagon
-//! orientation, checkboxes for the compass, for hiding the terrain's skirt and for the per-hex
-//! outlines, sliders for the sea level and the cap inset, and a button that frames the whole scene
-//! from overhead. The
-//! state-carrying buttons cycle rather than offering radio lists, because this is a debug panel and
-//! a cycle is one entity and one observer arm.
+//! Sixteen controls: a button cycling the label mode (including off), a button toggling the
+//! hexagon orientation, checkboxes for the compass, for hiding the terrain's skirt and for the
+//! per-hex outlines, sliders for the sea level, the cap inset, the shoreline, the snow line, the
+//! two tint knobs, the slope rock takes over at, the two that shape the blend between biomes and
+//! the bump, and a button that frames the whole scene from overhead. The state-carrying buttons
+//! cycle rather than offering radio lists, because this is a debug panel and a cycle is one entity
+//! and one observer arm.
 
 use bevy::prelude::*;
 use bevy::ui::Checked;
@@ -16,7 +17,7 @@ use bevy::ui_widgets::{
 
 use super::compass::ShowCompass;
 use super::framing::ResetViewRequested;
-use super::grid_render::{HideSkirt, SeaLevel, ShowGridLines};
+use super::grid_render::{BiomeBands, HideSkirt, SeaLevel, ShowGridLines, TerrainLook};
 use super::labels::LabelMode;
 use super::layout::HexLayout;
 use super::selection::Selected;
@@ -37,6 +38,34 @@ const SEA_LEVEL_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
 /// edge and nowhere else. Half the circumradius is where a cap has shrunk to a quarter of its area
 /// and the walls are all there is left to see; past that there is nothing to look at.
 const INSET_RANGE: std::ops::RangeInclusive<f32> = 0.0..=50.0;
+
+/// The band sliders' travel, in the same units as a height, and the same span as the terrain — a
+/// threshold outside it would simply retire the biomes either side of it.
+///
+/// Two of the four thresholds are on the panel: the one where sand gives way to grass, which is the
+/// shoreline, and the one where rock gives way to snow, which is the snow line. Those are the two
+/// with somewhere obvious to sit, so they are the two worth dragging; the woodland and rock bands
+/// stay where [`Bands::default`] puts them.
+const BAND_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
+
+/// The tint sliders' travel. Amplitude is a fraction of the biome's own colour, so half of it is
+/// already a strong effect and the top of the track is deliberately past useful. Wavelength is in
+/// world units, from well under one hexagon to most of the grid.
+const TINT_AMPLITUDE_RANGE: std::ops::RangeInclusive<f32> = 0.0..=0.5;
+const TINT_WAVELENGTH_RANGE: std::ops::RangeInclusive<f32> = 0.5..=20.0;
+
+/// Where rock takes over from the biome, in units of `1 - dot(normal, up)`. The top of the track is
+/// vertical, so past about half of it only the sheerest faces are ever bare.
+const ROCK_ONSET_RANGE: std::ops::RangeInclusive<f32> = 0.0..=1.0;
+
+/// How far the noise may push a blend weight, and how hard the boundary is sharpened afterwards.
+/// Zero noise is a straight linear crossfade; a sharpness of one leaves the ramp linear.
+const BLEND_NOISE_RANGE: std::ops::RangeInclusive<f32> = 0.0..=1.5;
+const BLEND_SHARPNESS_RANGE: std::ops::RangeInclusive<f32> = 1.0..=6.0;
+
+/// How hard the tint field's slope tilts the normal. The gradient of a field with six octaves is
+/// steep, so useful values are small and the top of this track is already past caricature.
+const BUMP_RANGE: std::ops::RangeInclusive<f32> = 0.0..=0.4;
 
 /// The thumb's width as a percentage of the track, kept out of the travel so it cannot overhang
 /// either end.
@@ -63,6 +92,14 @@ pub enum Control {
     GridLines,
     SeaLevel,
     Inset,
+    Shoreline,
+    SnowLine,
+    TintAmplitude,
+    TintWavelength,
+    RockOnset,
+    BlendNoise,
+    BlendSharpness,
+    Bump,
     ResetView,
 }
 
@@ -70,6 +107,10 @@ pub enum Control {
 #[derive(Component)]
 pub struct ControlCaption(pub Control);
 
+// A Bevy system's arguments are its dependencies, and each of these is one resource it
+// genuinely reads. Bundling them into a `SystemParam` to satisfy the lint would hide the
+// dependency list without shortening it.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_debug_ui(
     mut commands: Commands,
     mode: Res<LabelMode>,
@@ -78,6 +119,8 @@ pub fn spawn_debug_ui(
     hide_skirt: Res<HideSkirt>,
     show_grid_lines: Res<ShowGridLines>,
     sea: Res<SeaLevel>,
+    bands: Res<BiomeBands>,
+    look: Res<TerrainLook>,
 ) {
     commands
         .spawn((
@@ -134,6 +177,62 @@ pub fn spawn_debug_ui(
                 inset_percent,
                 INSET_RANGE,
                 inset_caption(inset_percent),
+            );
+            spawn_slider(
+                panel,
+                Control::Shoreline,
+                bands.0.grass,
+                BAND_RANGE,
+                shoreline_caption(bands.0.grass),
+            );
+            spawn_slider(
+                panel,
+                Control::SnowLine,
+                bands.0.snow,
+                BAND_RANGE,
+                snow_line_caption(bands.0.snow),
+            );
+            spawn_slider(
+                panel,
+                Control::TintAmplitude,
+                look.0.tint_amplitude,
+                TINT_AMPLITUDE_RANGE,
+                tint_amplitude_caption(look.0.tint_amplitude),
+            );
+            spawn_slider(
+                panel,
+                Control::TintWavelength,
+                look.0.tint_wavelength,
+                TINT_WAVELENGTH_RANGE,
+                tint_wavelength_caption(look.0.tint_wavelength),
+            );
+            spawn_slider(
+                panel,
+                Control::RockOnset,
+                look.0.rock_onset,
+                ROCK_ONSET_RANGE,
+                rock_onset_caption(look.0.rock_onset),
+            );
+            spawn_slider(
+                panel,
+                Control::BlendNoise,
+                look.0.blend_noise,
+                BLEND_NOISE_RANGE,
+                blend_noise_caption(look.0.blend_noise),
+            );
+            spawn_slider(
+                panel,
+                Control::BlendSharpness,
+                look.0.blend_sharpness,
+                BLEND_SHARPNESS_RANGE,
+                blend_sharpness_caption(look.0.blend_sharpness),
+            );
+            spawn_slider(
+                panel,
+                Control::Bump,
+                look.0.bump,
+                BUMP_RANGE,
+                bump_caption(look.0.bump),
             );
             spawn_button(panel, Control::ResetView, RESET_CAPTION.to_string());
         });
@@ -261,6 +360,46 @@ fn inset_caption(percent: f32) -> String {
     format!("inset: {percent:.0}%")
 }
 
+/// Named for what the threshold *is* on the ground rather than for the band it opens. The elevation
+/// where sand gives way to grass is the shoreline, and reading it as "grass band" would say where
+/// the number lives instead of what moving it does.
+fn shoreline_caption(level: f32) -> String {
+    format!("shoreline: {level:+.2}")
+}
+
+fn snow_line_caption(level: f32) -> String {
+    format!("snow line: {level:+.2}")
+}
+
+fn tint_amplitude_caption(amplitude: f32) -> String {
+    format!("tint: {:.0}%", amplitude * 100.0)
+}
+
+/// In world units, which is what the shader takes — the noise is a function of world position, so
+/// this is a size and not a fraction of anything.
+fn tint_wavelength_caption(wavelength: f32) -> String {
+    format!("tint scale: {wavelength:.1}")
+}
+
+/// Reads out the angle rather than the `1 - dot(normal, up)` the shader takes. The slider's units
+/// are the shader's because that costs nothing; a slope in degrees is what a person can picture.
+fn blend_noise_caption(noise: f32) -> String {
+    format!("blend noise: {:.0}%", noise * 100.0)
+}
+
+fn blend_sharpness_caption(sharpness: f32) -> String {
+    format!("blend edge: {sharpness:.1}")
+}
+
+fn bump_caption(bump: f32) -> String {
+    format!("bump: {:.0}%", bump * 100.0)
+}
+
+fn rock_onset_caption(onset: f32) -> String {
+    let degrees = (1.0 - onset).clamp(-1.0, 1.0).acos().to_degrees();
+    format!("rock above: {degrees:.0}\u{b0}")
+}
+
 /// Puts each thumb where its value says. The widget deliberately leaves this to the caller, since
 /// it cannot know how the thumb is drawn; the travel is reduced by the thumb's own width so it
 /// stops flush with either end of the track rather than hanging over it.
@@ -323,6 +462,8 @@ pub fn on_slider_changed(
     controls: Query<&Control>,
     mut sea: ResMut<SeaLevel>,
     mut layout: ResMut<HexLayout>,
+    mut bands: ResMut<BiomeBands>,
+    mut look: ResMut<TerrainLook>,
 ) {
     match controls.get(change.source) {
         Ok(Control::SeaLevel) if sea.0 != change.value => sea.0 = change.value,
@@ -333,10 +474,32 @@ pub fn on_slider_changed(
                 layout.inset = inset;
             }
         }
+        Ok(Control::Shoreline) if bands.0.grass != change.value => bands.0.grass = change.value,
+        Ok(Control::SnowLine) if bands.0.snow != change.value => bands.0.snow = change.value,
+        Ok(Control::TintAmplitude) if look.0.tint_amplitude != change.value => {
+            look.0.tint_amplitude = change.value
+        }
+        Ok(Control::TintWavelength) if look.0.tint_wavelength != change.value => {
+            look.0.tint_wavelength = change.value
+        }
+        Ok(Control::RockOnset) if look.0.rock_onset != change.value => {
+            look.0.rock_onset = change.value
+        }
+        Ok(Control::BlendNoise) if look.0.blend_noise != change.value => {
+            look.0.blend_noise = change.value
+        }
+        Ok(Control::BlendSharpness) if look.0.blend_sharpness != change.value => {
+            look.0.blend_sharpness = change.value
+        }
+        Ok(Control::Bump) if look.0.bump != change.value => look.0.bump = change.value,
         _ => {}
     }
 }
 
+// A Bevy system's arguments are its dependencies, and each of these is one resource it
+// genuinely reads. Bundling them into a `SystemParam` to satisfy the lint would hide the
+// dependency list without shortening it.
+#[allow(clippy::too_many_arguments)]
 pub fn update_captions(
     mode: Res<LabelMode>,
     layout: Res<HexLayout>,
@@ -344,6 +507,8 @@ pub fn update_captions(
     hide_skirt: Res<HideSkirt>,
     show_grid_lines: Res<ShowGridLines>,
     sea: Res<SeaLevel>,
+    bands: Res<BiomeBands>,
+    look: Res<TerrainLook>,
     mut captions: Query<(&ControlCaption, &mut Text)>,
 ) {
     if !mode.is_changed()
@@ -352,6 +517,8 @@ pub fn update_captions(
         && !hide_skirt.is_changed()
         && !show_grid_lines.is_changed()
         && !sea.is_changed()
+        && !bands.is_changed()
+        && !look.is_changed()
     {
         return;
     }
@@ -364,6 +531,14 @@ pub fn update_captions(
             Control::GridLines => checkbox_caption(show_grid_lines.0, GRID_LINES_CAPTION),
             Control::SeaLevel => sea_level_caption(sea.0),
             Control::Inset => inset_caption(layout.inset * 100.0),
+            Control::Shoreline => shoreline_caption(bands.0.grass),
+            Control::SnowLine => snow_line_caption(bands.0.snow),
+            Control::TintAmplitude => tint_amplitude_caption(look.0.tint_amplitude),
+            Control::TintWavelength => tint_wavelength_caption(look.0.tint_wavelength),
+            Control::RockOnset => rock_onset_caption(look.0.rock_onset),
+            Control::BlendNoise => blend_noise_caption(look.0.blend_noise),
+            Control::BlendSharpness => blend_sharpness_caption(look.0.blend_sharpness),
+            Control::Bump => bump_caption(look.0.bump),
             Control::ResetView => RESET_CAPTION.to_string(),
         };
     }

@@ -137,7 +137,36 @@ or rustc change, since both are in the cache key, and GitHub evicting an entry u
 Verified on 2026-08-13 before the first deploy: the release build served from a `/hex-terrain/`
 subpath renders, fetches `assets/shaders/water.wgsl` (200), and logs only the expected WebGL2
 downlevel warnings (no OIT, no background motion vectors, no SSAO, no atmosphere — see
-[[bevy-0-19-api]]). Bevy also probes `water.wgsl.meta` and takes a 404; that is normal and harmless.
+[[bevy-0-19-api]]).
+
+### The `.meta` probe is only harmless when the host answers 404
+
+Bevy probes `<asset>.meta` before every asset. GitHub Pages answers that with a real 404, so the
+probe is ignored and the asset loads — which is why the deploy verified above worked. **A host that
+answers a missing path with its index page and a `200` breaks the asset outright**: Bevy takes the
+HTML as meta, fails to deserialize it, and abandons the load, so the asset itself is never even
+requested. `trunk serve` does exactly that.
+
+The symptom is silent and misleading. Every mesh whose material needs the shader simply never
+draws — no pipeline error, no shader error, nothing in the console but one line:
+
+```
+ERROR Failed to deserialize meta for asset shaders/terrain.wgsl: ... ExpectedNamedStructLike("AssetMetaMinimal")
+```
+
+That reads as cosmetic and is not. It cost a full session of shader bisecting on 2026-08-14, all of
+it wasted, because editing `terrain.wgsl` provably changed nothing — including replacing the whole
+fragment body with solid red. **The file was never being fetched.** The cheap check that would have
+ended it in a minute, in the page's console:
+
+```js
+performance.getEntriesByType('resource').filter(e => /wgsl/.test(e.name)).map(e => e.name)
+```
+
+Only `.meta` entries, and no entry for the shader itself, is the whole diagnosis.
+
+`main.rs` therefore sets `AssetPlugin { meta_check: AssetMetaCheck::Never, .. }`. No asset here has
+a `.meta` file, so the lookup can only ever cost two round trips and, on the wrong host, the render.
 
 ## Shared build directory — adopted
 

@@ -45,7 +45,7 @@ use bevy::{
 use super::GridModel;
 use super::layout::HexLayout;
 use super::selection::Selected;
-use crate::hex::{Axial, Terrain, TerrainGrid};
+use crate::hex::{Axial, Bands, Biome, Terrain, TerrainGrid};
 
 /// Thin outlines for every hex.
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -61,8 +61,36 @@ pub struct Highlight;
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShowGridLines(pub bool);
 
-const CAP_FILL: Color = Color::srgb(0.16, 0.19, 0.26);
+/// Each biome's cap colour, indexed by [`Biome::index`].
+///
+/// Flat base colours, with nothing in them standing in for detail — variation across a run of one
+/// biome is the shading's job, not the palette's, and a palette that tries to do it makes every cap
+/// of that biome wrong in the same way.
+const BIOME_FILL: [Color; 5] = [
+    Color::srgb(0.78, 0.71, 0.52), // Sand
+    Color::srgb(0.35, 0.51, 0.25), // Grass
+    Color::srgb(0.17, 0.31, 0.19), // Woodland
+    Color::srgb(0.44, 0.43, 0.41), // Rock
+    Color::srgb(0.93, 0.94, 0.96), // Snow
+];
+
+/// The colour of a face steep enough to have nothing growing on it. **Linear**, because it reaches
+/// the shader as a bare `vec3`.
+///
+/// Its own colour rather than the `Rock` biome's: the biome is a band of elevation and this is a
+/// property of slope, and the two only look alike by coincidence. A grassy hillside and the cliff
+/// below it are the same biome.
+const ROCK_FACE: LinearRgba = LinearRgba::rgb(0.10, 0.093, 0.085);
+
+/// The rock the skirt's prism is drawn in. Below the terrain rather than part of it, so it takes no
+/// biome — a cut through the ground shows what is under the ground.
 const WALL_FILL: Color = Color::srgb(0.13, 0.16, 0.22);
+
+/// A biome's cap colour.
+fn biome_fill(biome: Biome) -> Color {
+    BIOME_FILL[biome.index()]
+}
+
 const WATER_FILL: Color = Color::srgb(0.06, 0.20, 0.34);
 
 /// Colour of water shallow enough to see the bottom through — the pale end of the shoaling ramp,
@@ -149,6 +177,125 @@ impl MaterialExtension for WaterExtension {
     }
 }
 
+/// The material every cap and every wall is drawn with — one per biome, differing only in the base
+/// colour the extension then breaks up.
+///
+/// An extension for the same reason the water is one: the lighting, the shadows and the environment
+/// reflection are all stock, and the only thing the standard material cannot express is that two
+/// caps of one biome should not be identical.
+pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExtension>;
+
+/// What the terrain shader needs beyond a standard material. Mirrors `TerrainSettings` in
+/// `assets/shaders/terrain.wgsl`; the two are bound together by nothing but agreement, so they move
+/// in the same edit.
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType, Reflect)]
+pub struct TerrainSettings {
+    /// Every biome's colour, indexed by [`Biome::index`], **linear**. Only a wall reads this — a cap
+    /// carries its one biome in its own base colour — but both share a settings struct, so both
+    /// carry it.
+    pub palette: [Vec4; 5],
+    /// The colour of exposed rock. **Linear**, like the water's shallow colour and for the same
+    /// reason: it reaches the shader as a bare `vec3` and is mixed there against a base colour the
+    /// material has already converted.
+    pub rock: Vec3,
+    /// How far the tint may swing either side of a biome's own colour, as a fraction of it.
+    pub tint_amplitude: f32,
+    /// The grid's up axis, from [`HexLayout::plane`]. Written by [`sync_look`] rather than by the
+    /// panel — it is the one field here the view owns and the user does not.
+    pub up: Vec3,
+    /// Size of the largest noise feature, in world units — the one number here that has a size, and
+    /// the reason this struct lives in the view rather than the model.
+    pub tint_wavelength: f32,
+    /// Where rock starts taking over from the biome, and over how much slope it finishes, both in
+    /// units of `1 - dot(normal, up)`: level is 0, a 45° face is 0.29, and vertical is 1.
+    pub rock_onset: f32,
+    pub rock_width: f32,
+    /// How far the noise may push a blend weight either side of what the geometry says. Zero is a
+    /// straight linear crossfade between biomes; larger makes the boundary interlock.
+    pub blend_noise: f32,
+    /// The exponent the weights are raised to before they are normalised. One leaves the ramp
+    /// linear; larger narrows the band over which two biomes are genuinely mixed.
+    pub blend_sharpness: f32,
+    /// How hard the tint field's slope tilts the normal. Zero leaves the geometry's own normal, and
+    /// a cap goes back to being a flat plate.
+    pub bump: f32,
+}
+
+/// The material extension. Bindings start at 100 because 0-99 belong to the base material.
+#[derive(Asset, AsBindGroup, Clone, Debug, Reflect)]
+pub struct TerrainExtension {
+    #[uniform(100)]
+    pub settings: TerrainSettings,
+}
+
+impl MaterialExtension for TerrainExtension {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/terrain.wgsl".into()
+    }
+}
+
+/// Every knob the terrain shader takes, in one resource so the panel drives one thing and the
+/// materials are written from one place.
+///
+/// It *is* the shader's settings struct rather than a parallel copy of it, so a field cannot be
+/// added to one and forgotten in the other.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct TerrainLook(pub TerrainSettings);
+
+impl Default for TerrainLook {
+    fn default() -> Self {
+        Self(TerrainSettings {
+            palette: Biome::ALL.map(|biome| {
+                let c = biome_fill(biome).to_linear();
+                Vec4::new(c.red, c.green, c.blue, 1.0)
+            }),
+            blend_noise: 0.55,
+            blend_sharpness: 2.2,
+            bump: 0.25,
+            rock: Vec3::new(ROCK_FACE.red, ROCK_FACE.green, ROCK_FACE.blue),
+            // Overwritten from the layout before it ever reaches a material; this is only what the
+            // struct holds until `spawn_grid` runs.
+            up: Vec3::Y,
+            rock_onset: 0.22,
+            rock_width: 0.30,
+            tint_amplitude: 0.28,
+            // Under one hexagon at `HEX_SCALE` of 1 — deliberately short. Even the coarsest octave
+            // has to vary across a *single* cap, because a cap uniform within itself reads as flat
+            // however much it differs from its neighbours. Regional variation is what a drag of the
+            // slider towards the long end supplies.
+            tint_wavelength: 1.6,
+        })
+    }
+}
+
+/// Writes the panel's settings into every terrain material.
+///
+/// One uniform per biome, so a change touches ten materials. They are separate assets only because
+/// each carries a different base colour; everything the shader reads is identical across them.
+pub fn sync_look(
+    look: Res<TerrainLook>,
+    layout: Res<HexLayout>,
+    shared: Option<Res<SharedAssets>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
+) {
+    let Some(shared) = shared else {
+        return;
+    };
+    if !look.is_changed() && !layout.is_changed() {
+        return;
+    }
+    // The up axis is the layout's, not the panel's, and the orientation toggle can move it.
+    let settings = TerrainSettings {
+        up: layout.plane.normal(),
+        ..look.0
+    };
+    for handle in shared.cap_materials.iter().chain([&shared.wall_material]) {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.extension.settings = settings;
+        }
+    }
+}
+
 const EDGE: Color = Color::srgb(0.35, 0.75, 0.85);
 const ACTIVE_EDGE: Color = Color::srgb(1.0, 0.78, 0.25);
 
@@ -162,6 +309,15 @@ const ACTIVE_EDGE_WIDTH: f32 = 6.0;
 #[derive(Component)]
 pub struct HexCell {
     pub coord: Axial,
+}
+
+/// The child holding a cell's cap: the level hexagon at the location's own height.
+///
+/// The mesh is shared by every location, so this carries the coordinate that says which location's
+/// cap it is — which is what lets one cap's material change without touching the others.
+#[derive(Component)]
+pub struct HexCap {
+    coord: Axial,
 }
 
 /// The child holding a cell's wall ring, which is unique to that cell because it depends on the
@@ -195,6 +351,14 @@ pub struct HideSkirt(pub bool);
 pub struct SharedAssets {
     cap: Handle<Mesh>,
     water_material: Handle<WaterMaterial>,
+    /// One cap material per biome, indexed by [`Biome::index`]. A cap is one biome throughout, so
+    /// its colour can live in the material and the caps batch in five groups rather than
+    /// thirty-seven.
+    cap_materials: [Handle<TerrainMaterial>; 5],
+    /// **One** material for every wall, because a wall is not one biome: it carries the blend
+    /// weights and the biomes they belong to per vertex, and reads the colours out of the palette
+    /// uniform. Nothing about it varies per location.
+    wall_material: Handle<TerrainMaterial>,
 }
 
 /// A location's water surface, so the set of them can be rebuilt when the level moves.
@@ -211,6 +375,12 @@ impl Default for SeaLevel {
         Self(crate::hex::SEA_LEVEL)
     }
 }
+
+/// The elevations the biomes change at. Dimensionless model values held as a view resource, exactly
+/// as [`SeaLevel`] is — the panel drives them, and the renderer is the only thing that reads them,
+/// because nothing in the model stores a biome to be classified into.
+#[derive(Resource, Debug, Default, PartialEq)]
+pub struct BiomeBands(pub Bands);
 
 /// Writes the sea level into the model, which is what actually decides where water is.
 ///
@@ -246,14 +416,41 @@ pub fn configure_gizmo_widths(mut store: ResMut<GizmoConfigStore>) {
 }
 
 /// Spawns a cell per location: a parent carrying the transform, with a cap and a wall under it.
+// A Bevy system's arguments are its dependencies, and each of these is one resource it
+// genuinely reads. Bundling them into a `SystemParam` to satisfy the lint would hide the
+// dependency list without shortening it.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_grid(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut water_materials: ResMut<Assets<WaterMaterial>>,
+    mut terrain_materials: ResMut<Assets<TerrainMaterial>>,
     grid: Res<GridModel>,
     layout: Res<HexLayout>,
+    bands: Res<BiomeBands>,
+    look: Res<TerrainLook>,
 ) {
+    let mut surface = |base_color: Color, roughness: f32| {
+        terrain_materials.add(TerrainMaterial {
+            base: StandardMaterial {
+                base_color,
+                perceptual_roughness: roughness,
+                ..default()
+            },
+            extension: TerrainExtension {
+                settings: TerrainSettings {
+                    up: layout.plane.normal(),
+                    ..look.0
+                },
+            },
+        })
+    };
+    let cap_materials = Biome::ALL.map(|biome| surface(biome_fill(biome), 0.9));
+    // White, and never read: a wall spans up to three biomes, so it has no one colour to hold and
+    // mixes its own per fragment out of the palette. Only the roughness here matters.
+    let wall_material = surface(Color::WHITE, 0.95);
+
     let shared = SharedAssets {
         cap: meshes.add(hex_fan_mesh(&layout, 1.0 - layout.inset)),
         water_material: water_materials.add(WaterMaterial {
@@ -284,18 +481,10 @@ pub fn spawn_grid(
                 },
             },
         }),
+        cap_materials,
+        wall_material,
     };
 
-    let cap_material = materials.add(StandardMaterial {
-        base_color: CAP_FILL,
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-    let wall_material = materials.add(StandardMaterial {
-        base_color: WALL_FILL,
-        perceptual_roughness: 0.95,
-        ..default()
-    });
     // White, because the skirt carries its colour per vertex — rock along the prism, and the
     // water's shoaling ramp across a cross-section. The standard material multiplies the two, so
     // anything but white would tint both.
@@ -309,22 +498,24 @@ pub fn spawn_grid(
     let lowest = lowest_height(&grid);
     for location in grid.iter() {
         let coord = location.coord;
+        let biome = Biome::at(&location.data, &bands.0).index();
         commands.spawn((
             HexCell { coord },
             cell_transform(&layout, coord),
             Visibility::default(),
             children![
                 (
+                    HexCap { coord },
                     Mesh3d(shared.cap.clone()),
-                    MeshMaterial3d(cap_material.clone()),
+                    MeshMaterial3d(shared.cap_materials[biome].clone()),
                     // The cap rides at the location's own height; the parent's scale turns that
                     // dimensionless height into world units along with everything else.
                     Transform::from_translation(up * location.data.height),
                 ),
                 (
                     HexWall { coord },
-                    Mesh3d(meshes.add(wall_mesh(&layout, &grid, coord))),
-                    MeshMaterial3d(wall_material.clone()),
+                    Mesh3d(meshes.add(wall_mesh(&layout, &grid, &bands.0, coord))),
+                    MeshMaterial3d(shared.wall_material.clone()),
                 ),
                 (
                     HexSkirt { coord },
@@ -487,6 +678,7 @@ fn cell_transform(layout: &HexLayout, coord: Axial) -> Transform {
 pub fn sync_cells(
     layout: Res<HexLayout>,
     grid: Res<GridModel>,
+    bands: Res<BiomeBands>,
     shared: Option<Res<SharedAssets>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut cells: Query<(&HexCell, &mut Transform)>,
@@ -511,7 +703,56 @@ pub fn sync_cells(
 
     for (wall, handle) in &walls {
         if let Some(mut mesh) = meshes.get_mut(&handle.0) {
-            *mesh = wall_mesh(&layout, &grid, wall.coord);
+            *mesh = wall_mesh(&layout, &grid, &bands.0, wall.coord);
+        }
+    }
+}
+
+/// Repaints every cap and wall when the biome a location falls in could have moved — which is a
+/// change to the model, since heights and water are what a biome is derived from, or a change to the
+/// bands themselves.
+///
+/// A guard of its own rather than a clause added to [`sync_cells`], which watches the layout alone
+/// because geometry is all it rebuilds and no model change moves any of it. A biome is the one thing
+/// a location presents that the layout has no part in.
+///
+/// The two queries exclude each other so Bevy can see they are disjoint. A `With` filter does not
+/// prove that on its own — an entity could carry both markers — and the mutable access to the same
+/// component type would otherwise be rejected.
+pub fn sync_biomes(
+    grid: Res<GridModel>,
+    bands: Res<BiomeBands>,
+    layout: Res<HexLayout>,
+    shared: Option<Res<SharedAssets>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut caps: Query<(&HexCap, &mut MeshMaterial3d<TerrainMaterial>)>,
+    walls: Query<(&HexWall, &Mesh3d)>,
+) {
+    let Some(shared) = shared else {
+        return;
+    };
+    if !grid.is_changed() && !bands.is_changed() {
+        return;
+    }
+
+    // A cap is one biome throughout, so its whole biome is its material. Assigned only where it
+    // actually differs: writing the same handle back would still mark the component changed, and a
+    // drag of the sea-level slider moves the biome of very few locations.
+    for (cap, mut material) in &mut caps {
+        if let Some(index) = grid
+            .get(cap.coord)
+            .map(|l| Biome::at(&l.data, &bands.0).index())
+            && material.0 != shared.cap_materials[index]
+        {
+            material.0 = shared.cap_materials[index].clone();
+        }
+    }
+
+    // A wall blends three biomes and carries which three per vertex, so a change of biome is a
+    // change of mesh — the same cost `sync_skirts` already pays when the model moves.
+    for (wall, handle) in &walls {
+        if let Some(mut mesh) = meshes.get_mut(&handle.0) {
+            *mesh = wall_mesh(&layout, &grid, &bands.0, wall.coord);
         }
     }
 }
@@ -685,7 +926,7 @@ fn water_fan_mesh(
 ///
 /// Built in the unit frame with dimensionless heights, so the cell's `Transform` supplies both the
 /// hex size and the height scale and nothing here has to be rebuilt when either changes.
-fn wall_mesh(layout: &HexLayout, grid: &TerrainGrid, coord: Axial) -> Mesh {
+fn wall_mesh(layout: &HexLayout, grid: &TerrainGrid, bands: &Bands, coord: Axial) -> Mesh {
     let unit = layout.unit();
     let corners = unit.corner_offsets();
     let up = unit.plane.normal();
@@ -699,15 +940,34 @@ fn wall_mesh(layout: &HexLayout, grid: &TerrainGrid, coord: Axial) -> Mesh {
         let (k, previous) = ((j + 1) % 6, (j + 5) % 6);
         let [vertex, near, _, far, _] = profile[j];
 
+        // The three cells whose biomes meet anywhere in this sector, and their packed identities.
+        // One triple serves all four triangles: every vertex here belongs to this cell, to the
+        // neighbour across edge `j`, or to the one across edge `j - 1`.
+        let cells = corner_cells(layout, grid, coord, j);
+        let packed = packed_biomes(grid, bands, &cells);
+        let w = |weights: [f32; 3]| over_present(weights, &cells);
+
+        // Weight by what each vertex actually stands on. A cap corner is this location's alone; a
+        // bridge end is the midpoint of two caps; the lattice vertex is the point three meet at,
+        // and is already the centroid of the three cap corners in plan.
+        let own = w([1.0, 0.0, 0.0]);
+        let along = w([0.5, 0.5, 0.0]);
+        let back = w([0.5, 0.0, 0.5]);
+        let middle = w([1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0]);
+
         // The bridge: level along the edge, so two equal neighbours are joined by a level ramp no
         // matter how tall anything else touching their corners is.
-        faces.push_flat([cap[j], cap[k], far]);
-        faces.push_flat([cap[j], far, near]);
+        faces.push_blended([cap[j], cap[k], far], [own, own, along], packed);
+        faces.push_blended([cap[j], far, near], [own, along, along], packed);
 
         // The wedge, between the two bridges either side of corner `j` and reaching the lattice
         // vertex itself — where the previous edge's profile ends.
-        faces.push_flat([cap[j], near, vertex]);
-        faces.push_flat([cap[j], vertex, profile[previous][3]]);
+        faces.push_blended([cap[j], near, vertex], [own, along, middle], packed);
+        faces.push_blended(
+            [cap[j], vertex, profile[previous][3]],
+            [own, middle, back],
+            packed,
+        );
     }
     faces.build()
 }
@@ -891,6 +1151,57 @@ fn corner_height(layout: &HexLayout, grid: &TerrainGrid, coord: Axial, corner: u
     mean_height(grid, &[coord, coord.neighbour(a), coord.neighbour(b)])
 }
 
+/// The three locations whose biomes meet in one sector of a wall: this one, the neighbour across
+/// edge `j`, and the neighbour across edge `j - 1`. `None` where the grid ends.
+///
+/// The same three [`corner_height`] averages over, and named the same way — `corner_directions(j)`
+/// gives the direction across edge `j` first and across edge `j - 1` second.
+fn corner_cells(
+    layout: &HexLayout,
+    grid: &TerrainGrid,
+    coord: Axial,
+    corner: usize,
+) -> [Option<Axial>; 3] {
+    let (across, before) = layout.corner_directions(corner);
+    let present = |direction| Some(coord.neighbour(direction)).filter(|c| grid.contains(*c));
+    [Some(coord), present(across), present(before)]
+}
+
+/// A weight triple confined to the locations that are actually there, renormalised to sum to one.
+///
+/// The same rule [`mean_height`] uses, and load-bearing for the same reason. Where the grid ends,
+/// two cells sharing a corner must still agree on what colour it is: dropping the absent one and
+/// renormalising gives both of them `(½, ½)` over the pair that remains, whereas substituting this
+/// cell's own biome for the missing one would have each of them weight itself double.
+fn over_present(weights: [f32; 3], cells: &[Option<Axial>; 3]) -> [f32; 3] {
+    let mut kept = [0.0; 3];
+    for (slot, cell) in cells.iter().enumerate() {
+        if cell.is_some() {
+            kept[slot] = weights[slot];
+        }
+    }
+    let total: f32 = kept.iter().sum();
+    if total > 0.0 {
+        for weight in &mut kept {
+            *weight /= total;
+        }
+    }
+    kept
+}
+
+/// Three biomes in one float, as `a + 8b + 64c`.
+///
+/// Rides in `uv.x`, which an untextured standard material never reads. It is constant across a
+/// triangle, so interpolating it returns it exactly rather than approximately — the reason the
+/// identities can share a channel with anything interpolated at all.
+fn packed_biomes(grid: &TerrainGrid, bands: &Bands, cells: &[Option<Axial>; 3]) -> f32 {
+    let index = |cell: Option<Axial>| {
+        cell.and_then(|c| grid.get(c))
+            .map_or(0, |l| Biome::at(&l.data, bands).index())
+    };
+    (index(cells[0]) + 8 * index(cells[1]) + 64 * index(cells[2])) as f32
+}
+
 /// The mean height over whichever of `coords` the grid actually holds.
 ///
 /// Averaging over what is **present**, rather than standing in a value for what is absent, is what
@@ -965,6 +1276,21 @@ impl Faces {
         self.push(tri, normal);
     }
 
+    /// A wall triangle carrying a blend weight triple per vertex in the colour channel, and the
+    /// three biomes those weights belong to packed into `uv.x`.
+    ///
+    /// The alpha is one: the standard material multiplies its base colour by the whole vertex
+    /// colour before this shader sees it, which for the three weights is meaningless and for the
+    /// alpha would be wrong. The shader discards that product and reads the weights itself.
+    fn push_blended(&mut self, tri: [Vec3; 3], weights: [[f32; 3]; 3], packed: f32) {
+        let normal = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalize_or_zero();
+        self.positions.extend(tri);
+        self.normals.extend([normal; 3]);
+        self.uvs.extend([[packed, 0.0]; 3]);
+        self.colours
+            .extend(weights.map(|w| [w[0], w[1], w[2], 1.0]));
+    }
+
     /// A triangle carrying a colour per vertex, normalled from its own winding.
     ///
     /// The colours are **linear**, since that is what a vertex colour is: the standard material
@@ -1000,6 +1326,7 @@ mod tests {
     use super::*;
     use crate::hex::{Grid, Location, Orientation, Terrain, undulating};
     use crate::view::layout::GridPlane;
+    use bevy::mesh::VertexAttributeValues;
 
     const EPS: f32 = 1e-4;
 
@@ -1053,7 +1380,10 @@ mod tests {
         for layout in layouts() {
             let lowest = lowest_height(&grid);
             let mut meshes = vec![hex_fan_mesh(&layout, 1.0 - layout.inset)];
-            meshes.extend(grid.coords().map(|c| wall_mesh(&layout, &grid, c)));
+            meshes.extend(
+                grid.coords()
+                    .map(|c| wall_mesh(&layout, &grid, &Bands::default(), c)),
+            );
             meshes.extend(grid.coords().map(|c| skirt_mesh(&layout, &grid, c, lowest)));
             for mesh in &meshes {
                 for ([v0, v1, v2], normal) in triangles(mesh) {
@@ -1067,6 +1397,90 @@ mod tests {
         }
     }
 
+    /// The money test for the blend, and the counterpart of
+    /// `cells_agree_on_every_shared_edge_and_corner` for colour rather than height: wherever two
+    /// locations meet, they must resolve the **same mix of biomes** at the shared point, or the
+    /// surface changes colour across a seam that has no geometry.
+    ///
+    /// What is compared is the weight each biome ends up with, not the triple it arrived in. Two
+    /// locations list the same three cells in different orders — a weight is only meaningful
+    /// against the identity beside it — and the shader is written to depend on the identity alone
+    /// for exactly this reason.
+    #[test]
+    fn neighbours_resolve_the_same_biome_mix_on_every_shared_vertex() {
+        use std::collections::{BTreeMap, HashMap};
+
+        let bands = Bands::default();
+        let grid = crate::hex::scenes::build("biomes").expect("the biomes scene");
+
+        // Weight per biome at one point, keyed finely enough to bucket the same world position
+        // reached from two different cells.
+        type Mix = BTreeMap<usize, u32>;
+        let mut at: HashMap<[i64; 3], Vec<(Axial, Mix)>> = HashMap::new();
+
+        for layout in layouts() {
+            at.clear();
+            for coord in grid.coords() {
+                let mesh = wall_mesh(&layout, &grid, &bands, coord);
+                let origin = layout.hex_to_world(coord);
+                let positions = mesh
+                    .attribute(Mesh::ATTRIBUTE_POSITION)
+                    .expect("positions")
+                    .as_float3()
+                    .expect("float3");
+                let VertexAttributeValues::Float32x4(colours) =
+                    mesh.attribute(Mesh::ATTRIBUTE_COLOR).expect("weights")
+                else {
+                    panic!("weights are float4")
+                };
+                let VertexAttributeValues::Float32x2(uvs) =
+                    mesh.attribute(Mesh::ATTRIBUTE_UV_0).expect("packed biomes")
+                else {
+                    panic!("uv is float2")
+                };
+
+                for ((position, weights), uv) in positions.iter().zip(colours).zip(uvs) {
+                    let world = origin + Vec3::from_array(*position);
+                    let key = [world.x, world.y, world.z].map(|v| (v * 1e4).round() as i64);
+
+                    let packed = (uv[0] + 0.5) as usize;
+                    let ids = [packed % 8, (packed / 8) % 8, (packed / 64) % 8];
+                    let mut mix = Mix::new();
+                    let mut total = 0.0;
+                    for (slot, id) in ids.into_iter().enumerate() {
+                        if weights[slot] > 0.0 {
+                            // Compared by bits, as the heights are: both cells run the same
+                            // arithmetic on the same values, so "close" would hide a real drift.
+                            *mix.entry(id).or_default() += weights[slot].to_bits();
+                            total += weights[slot];
+                        }
+                    }
+                    assert!(
+                        (total - 1.0).abs() < 1e-5,
+                        "{coord:?} weights sum to {total}, not one"
+                    );
+                    at.entry(key).or_default().push((coord, mix));
+                }
+            }
+
+            let mut shared = 0;
+            for (key, claims) in &at {
+                let (first, mix) = &claims[0];
+                for (other, theirs) in &claims[1..] {
+                    shared += 1;
+                    assert_eq!(
+                        mix, theirs,
+                        "{first:?} and {other:?} disagree on the mix at {key:?} ({layout:?})"
+                    );
+                }
+            }
+            assert!(
+                shared > 0,
+                "no vertex was reached from two cells ({layout:?})"
+            );
+        }
+    }
+
     /// Caps face up, and so does every wall: the surface is a terrain, so nothing overhangs.
     #[test]
     fn nothing_faces_downwards() {
@@ -1077,7 +1491,8 @@ mod tests {
                 assert!(normal.abs_diff_eq(up, EPS), "a cap should be level");
             }
             for coord in grid.coords() {
-                for (tri, normal) in triangles(&wall_mesh(&layout, &grid, coord)) {
+                for (tri, normal) in triangles(&wall_mesh(&layout, &grid, &Bands::default(), coord))
+                {
                     assert!(
                         normal.dot(up) >= -EPS,
                         "wall at {coord:?} overhangs: {normal:?} for {tri:?}"
@@ -1177,7 +1592,7 @@ mod tests {
         assert_eq!(edge_height(&layout, &grid, left, edge), 0.0);
 
         // And the flat-shaded wall says the same: no triangle of the bridge tilts.
-        for (tri, normal) in triangles(&wall_mesh(&layout, &grid, left)) {
+        for (tri, normal) in triangles(&wall_mesh(&layout, &grid, &Bands::default(), left)) {
             if tri.iter().all(|v| v.dot(up).abs() < EPS) {
                 assert!(
                     normal.abs_diff_eq(up, EPS),
@@ -1196,7 +1611,7 @@ mod tests {
         let up = layout.plane.normal();
         for coord in grid.coords() {
             let mut reach: f32 = 0.0;
-            for (tri, _) in triangles(&wall_mesh(&layout, &grid, coord)) {
+            for (tri, _) in triangles(&wall_mesh(&layout, &grid, &Bands::default(), coord)) {
                 for v in tri {
                     reach = reach.max((v - v.dot(up) * up).length());
                 }
@@ -1230,7 +1645,12 @@ mod tests {
             cap(&narrow)
         );
 
-        let rim = |layout: &HexLayout| reach(&wall_mesh(layout, &grid, Axial::ZERO), layout);
+        let rim = |layout: &HexLayout| {
+            reach(
+                &wall_mesh(layout, &grid, &Bands::default(), Axial::ZERO),
+                layout,
+            )
+        };
         assert!((rim(&wide) - 1.0).abs() < EPS);
         assert!((rim(&narrow) - 1.0).abs() < EPS);
     }
@@ -1525,7 +1945,7 @@ mod tests {
         for layout in layouts() {
             let lowest = lowest_height(&grid);
             for coord in grid.coords() {
-                let wall = positions(&wall_mesh(&layout, &grid, coord));
+                let wall = positions(&wall_mesh(&layout, &grid, &Bands::default(), coord));
                 let skirt = positions(&skirt_mesh(&layout, &grid, coord, lowest));
                 for j in 0..6 {
                     let profile = edge_profile(&layout, &grid, coord, j);
@@ -1720,7 +2140,7 @@ mod tests {
             },
         ));
 
-        let mesh = wall_mesh(&layout, &grid, Axial::ZERO);
+        let mesh = wall_mesh(&layout, &grid, &Bands::default(), Axial::ZERO);
         let brim = triangles(&mesh);
         assert_eq!(brim.len(), 24, "six bridges and six wedges");
         for (tri, _) in brim {

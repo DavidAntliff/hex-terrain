@@ -7,17 +7,20 @@
 //!
 //! Follows <https://www.redblobgames.com/grids/hexagons/>.
 
+pub mod biome;
 pub mod coords;
 pub mod grid;
 pub mod orientation;
 pub mod scenes;
 
+pub use biome::{Bands, Biome};
 pub use coords::{Axial, Cube, DIRECTIONS, Doubled, FractionalCube};
 pub use grid::{Grid, Location};
 pub use orientation::Orientation;
 
-/// Per-location payload. The extension point for biome, ownership and anything else a hex needs
-/// to carry; so far, elevation and water.
+/// Per-location payload. The extension point for ownership and anything else a hex needs to carry;
+/// so far, elevation and water. [`Biome`] is deliberately *not* here — it is derived from these two
+/// rather than stored beside them, for the reasons on [`biome`].
 #[derive(Debug, Default, Clone, Copy, PartialEq)]
 pub struct Terrain {
     /// Elevation as a dimensionless level, signed and roughly `-1..=1`. Zero is the grid plane;

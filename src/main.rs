@@ -4,6 +4,7 @@
 use clap::{Parser, builder::PossibleValuesParser};
 
 use bevy::{
+    asset::AssetMetaCheck,
     camera::Exposure,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     light::{
@@ -82,16 +83,30 @@ fn main() {
     let pinned = pinned_resolution();
 
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "hex-terrain".into(),
-                fit_canvas_to_parent: true,
-                resize_constraints: size_hints(&pinned),
-                resolution: pinned.unwrap_or_default(),
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "hex-terrain".into(),
+                        fit_canvas_to_parent: true,
+                        resize_constraints: size_hints(&pinned),
+                        resolution: pinned.unwrap_or_default(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                // No asset here has a `.meta` file, and on the web asking for one is
+                // actively harmful: a static host that answers a missing path with its
+                // index page and a 200 has Bevy read that as meta, fail to deserialize
+                // it, and abandon the asset — the shader is then never fetched at all
+                // and every mesh using it silently goes undrawn. Skipping the lookup
+                // costs nothing on native, where the absent file is reported missing.
+                // See spec/wiki/build-performance.md.
+                .set(AssetPlugin {
+                    meta_check: AssetMetaCheck::Never,
+                    ..default()
+                }),
+        )
         // `FreeCameraPlugin` is what flies the camera while the right button is held; the rest of
         // the controls are `camera::orbit`'s. See spec/camera-controls.md.
         .add_plugins((

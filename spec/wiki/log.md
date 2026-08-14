@@ -589,3 +589,220 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   from `HEX_TERRAIN_CAMERA=top` with the resource forced true and left at its default show the
   outlines present and absent, with the report reading `grid_lines` `true` and `false` to match.
   Not verified: clicking the checkbox itself, as no pointer-injection tool exists here.
+
+## [2026-08-14] feature | five biomes, derived from elevation rather than stored
+
+- **A biome is a function, not a field.** `Biome::at(&Terrain, &Bands)` in `src/hex/biome.rs`
+  classifies a location from the height and water it already has. Nothing authors biomes — there is
+  no generator and no editor — so a field on `Terrain` would be written by this same formula at
+  construction and merely cached. It would also not be free: **no `Terrain` literal in the tree uses
+  `..default()`**, so all ~20 exhaustive constructions across `scenes.rs`, `hex/mod.rs` and four test
+  modules would have to name a value nothing yet varies. When something does author biomes, an
+  `Option<Biome>` overriding this is the extension, and this becomes the `None` case. See [[biomes]].
+- **Submerged ground is sand, whatever its elevation.** The sea bed and the strand above it are the
+  same material, so the water line is where the ground stops being wet rather than where it changes
+  kind. Without that rule a flooded mountain basin draws its bed as snow through the water.
+- **`With` does not prove two queries disjoint; `Without` does.** `sync_biomes` takes mutable
+  `MeshMaterial3d<StandardMaterial>` twice, once for caps and once for walls. Bevy rejects that on
+  `With<HexCap>` / `With<HexWall>` alone, because an entity could carry both markers — the pair has
+  to exclude each other explicitly. Recorded in [[bevy-0-19-api]].
+- **The cap got a marker it should always have had.** `probe/report.rs` identified a cap by what it
+  was *not* — `(Without<HexWall>, Without<HexSkirt>, Without<WaterSurface>)` — so every new kind of
+  cell child had to be remembered there or be silently counted as a cap. `HexCap` makes it positive,
+  and is what `sync_biomes` needed anyway to repaint one location's cap without touching the rest.
+- **A model-only change reached nothing before this.** `sync_cells` guards on `layout.is_changed()`,
+  which is right for geometry — no model change moves any of it — but a biome is the one thing a
+  location presents that the layout has no part in. Hence a system and a guard of its own.
+- **A ramp only ever makes *consecutive* biomes adjacent**, which is all a continuous height field
+  can produce. The `biomes` scene therefore carries an outlier peak at `(-2,1)`, standing snow
+  directly against the low ground: a stepped terrain can do that across one cliff, and a transition
+  that only ever meets its immediate neighbour is not the one worth testing. A test asserts both that
+  every biome appears and that some neighbouring pair is non-consecutive.
+- Verified: 99 tests (92 lib, up 7, plus 7 in the binary), `cargo clippy --all-targets` clean,
+  screenshots of `biomes` at `top`/`iso`/`low` and `sea` at `iso`, pinned to 1280x720. **Not
+  verified:** dragging the two new sliders, for the same reason the inset slider was not — there is
+  no pointer-injection tool here. The panel's own control count in `debug_ui.rs` was already one
+  stale before this change; it is now nine in both that doc comment and `README.md`.
+
+## [2026-08-14] feature | a procedural tint, and the octave that actually matters
+
+- **A second material extension, following [[water]]'s pattern exactly.**
+  `assets/shaders/terrain.wgsl` is fragment-only, binds at 100, and calls
+  `pbr_input_from_standard_material` → mutate → `apply_pbr_lighting` →
+  `main_pass_post_lighting_processing`. It ships with no build change: `index.html` already copies
+  the whole `assets/shaders` directory. Caps and walls moved from `StandardMaterial` to
+  `TerrainMaterial`, ten of them, differing only in base colour.
+- **Two mistakes worth recording, both of which shipped looking like they worked.**
+  - *The wavelength.* The intuition is that large-scale variation across the map is what stops a run
+    of one biome reading as tiles, so the first build used a wavelength of 4.5 world units (about two
+    hexes) with the textbook persistence of 0.5. What actually reads as flat is a cap being uniform
+    **within itself** — a cap differing from its neighbour does not help, because the eye takes each
+    cap as one surface regardless. Only the octaves shorter than a cap put texture inside one, and
+    persistence is what pays them. Measured over a cap's worth of surface, as a share of the swing:
+    `2.5 / 0.60 / 5 octaves` gives 26% inside a cap against 42% between caps; `1.6 / 0.80 / 6` gives
+    37% against 32%, the first setting where the texture within a cap outweighs the step between them.
+  - *The amplitude.* Summed value noise is an **average of independent values**, so it concentrates
+    about its mean like any other average, and the nominal `-1..1` is a range it essentially never
+    visits — measured, `(fbm - 0.5) * 2` has a standard deviation of 0.15. So `tint_amplitude` named a
+    tail it never reached: a nominal 22% moved typical brightness by 4%, and against a tint-off frame
+    came to a peak of **3 parts in 255**. The swing is now divided by two of its standard deviations,
+    which makes the setting mean what it says; that divisor must be re-measured whenever the octave
+    count or persistence moves.
+  - **The lesson under both is the method, not the numbers**: "it looks subtle but it's there" was
+    wrong twice, and only a pixel diff against a control frame settled it. Within-cap variation went
+    0.99 → 2.23 → 3.56 levels of 255 across the two fixes, peak 8 → 12 → 16.
+- **Noise is 3D, not 2D on the ground plane.** Two reasons: a cap and the wall below it would
+  otherwise share a tint and the wall would be vertically streaked, and `GridPlane` means there is no
+  fixed "ground plane" to project onto. Sampling the full world position sidesteps both.
+- **An integer avalanche, not `fract(sin(...))`.** The sine trick's quality depends on how the driver
+  evaluates `sin` at large arguments and bands visibly on some GPUs. The lattice index is shifted by
+  a large positive constant before conversion so nothing depends on how a negative value casts to
+  `u32`, and only the top 24 bits reach the float, which is what an `f32` holds exactly.
+- **Octaves step by 2.03 and are displaced, not doubled.** Exact doubling lands every octave's
+  lattice on the same integer planes, where they reinforce into a visible grid.
+- `TerrainLook` **is** the shader's settings struct rather than a parallel copy, so a field cannot be
+  added to one and forgotten in the other.
+- Verified: 99 tests, `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`. A controlled A/B on `biomes` at 1280x720 `iso`, tint 0% against tint 22%
+  with everything else equal. **Not verified:** the shader in a browser on WebGL2 — per [[water]] the
+  WGSL→GLSL translation happens there at runtime, so this is the check that counts and it is deferred
+  to the end of the procedural work. Three Bevy systems now carry
+  `#[allow(clippy::too_many_arguments)]`; each argument is a resource genuinely read, and a
+  `SystemParam` would hide the dependency list without shortening it.
+
+## [2026-08-14] feature | rock by slope, and an ambient occlusion that could not work here
+
+- **A steep face is bare rock, whatever biome it stands in.** `1 - dot(normal, up)` against a
+  threshold in the shader, with the up axis passed in as a uniform from `HexLayout::plane` rather
+  than assumed to be `+Y`. Caps need no exemption: they are level, so their slope is zero and the
+  mix never fires. Measured on `biomes`: 6.2% of the visible terrain, median 8 levels of 255,
+  99th percentile 94.
+- **Ambient occlusion was built, measured and removed. The measurement is the point.** A per-vertex
+  crease term rode in `uv.y` and attenuated `PbrInput::diffuse_occlusion`, which is the correct
+  channel — it dims the indirect light a shut-in surface loses and leaves direct sun alone. It was
+  invisible, and not because of a bug: **this scene is lit mostly by its directional sun.** Occluding
+  *all* indirect light on every surface — a hardcoded 80%, geometry ignored — moves the median
+  terrain pixel by **zero** levels of 255, with a maximum of 42. So the ceiling on any physically
+  honest AO here is a handful of levels, and the geometric term produced three. Deleted rather than
+  faked by darkening albedo, which would dim a crease in full sunlight too. Worth revisiting only if
+  the lighting stops being sun-dominated.
+- **`max` over an image diff is a trap, and it cost several rounds.** A single antialiased edge pixel
+  put the peak difference at 173 of 255 between two frames that were, in the body of the terrain,
+  identical — which read as "the effect is strong" when the median was 0. Percentiles over a mask of
+  terrain pixels are the statistic; the peak is noise. The same mistake in the other direction is
+  what made the [[biomes]] tint look like it worked in the first place.
+- **Screenshots from `probe` are deterministic**, because the settle and repose frame counts are
+  fixed and `globals.time` follows the frame count. Two runs of unchanged code are byte-identical
+  even with the water animating, so a zero diff really does mean nothing changed — which is what
+  proved the occlusion uniform was inert rather than merely subtle.
+- **To find out whether a per-vertex channel reaches the fragment shader, render it as albedo.**
+  `base_color = vec3(in.uv.y)` settled in one frame that `uv.y` was arriving correctly and moved the
+  search to the lighting, after two rounds of guessing at the uniform layout.
+- Verified: 99 tests, `cargo clippy --all-targets` clean. `WALL_SHADE` stays at 0.78 and is now
+  documented as a deliberate thumb on the scale, since the measurement above shows the lighting
+  cannot supply that difference on its own.
+
+## [2026-08-14] feature | three biomes blended across a wall, and an ordering that was not needed
+
+- **A wall carries its blend, a cap carries its biome.** `wall_mesh` writes a weight triple per
+  vertex into the colour channel and packs the three biomes it blends into `uv.x` as `a + 8b + 64c`.
+  Weights come from what each vertex stands on: a cap corner is this location's alone, a bridge end
+  is the midpoint of two caps, and the lattice vertex is the point three meet at — already the
+  centroid of the three cap corners in plan, because they are inset along directions 120° apart
+  which sum to zero. One triple serves all four triangles of a sector.
+- **The canonical ordering the design called for turned out to be unnecessary.** The plan was to sort
+  the three cells of a wedge by `(q, r)`, as `mean_height` does for heights, so two locations agree
+  on which weight belongs to which cell. Two facts make it moot: the weights at every *shared* point
+  are symmetric — a half each along an edge, a third each at a lattice vertex — so the slot a cell
+  occupies cannot change their sum; and the shader perturbs each weight by noise keyed to the
+  **biome identity** rather than to the slot, which is the one place ordering could have leaked back
+  in. Keying the noise that way is deliberate and load-bearing, not incidental.
+- **The seam test compares the resolved mix, not the triple.** `neighbours_resolve_the_same_biome_mix_on_every_shared_vertex`
+  buckets every wall vertex by world position, unpacks the identities, accumulates weight per biome,
+  and asserts two locations reaching the same point agree **bitwise** — which they do, across all
+  four layouts. That is the same standard `cells_agree_on_every_shared_edge_and_corner` holds heights
+  to. Confirmed to bite: replacing the lattice vertex's `(⅓,⅓,⅓)` with an asymmetric triple fails it
+  with the offending pair and position.
+- **Packing identities into `uv.x` is safe because they are constant across a triangle.** An
+  interpolated attribute returns a constant exactly, so the unpack cannot land between two values.
+- **The wall lost its own colour, and two constants with it.** `WALL_SHADE` and `biome_wall_fill` are
+  gone: a wall now takes the same palette the caps do, and what makes it read darker is the tilt of
+  its normal, which the renderer was already doing. Five wall materials collapsed to one, since
+  nothing about a wall's material varies per location any more.
+- Verified: 100 tests (93 lib, 7 binary), `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`. Measured on `biomes` at 1280x720 `iso` against the step-3 frame: the blend
+  moves 28.2% of the visible terrain at a median of 10 levels of 255 and a 99th percentile of 59; the
+  perturbation on top of it moves a further 15.3% at a median of 7. **Not verified:** a browser on
+  WebGL2, still deferred to the end — and `#ifdef VERTEX_COLORS` selecting the wall path inside a
+  material extension is exactly the kind of thing that could translate differently there.
+
+## [2026-08-14] feature | the normal follows the noise, and a shared build directory bites
+
+- **Tilting the normal by the tint field's slope is the largest single gain of the five steps.** A
+  cap is a flat plate and reads as one under a directional light however its colour varies; once the
+  normal follows the same field that tinted it, a dip is darker *and* faces differently, which is
+  what the eye reads as texture rather than as a stain. Forward differences, so three extra noise
+  evaluations rather than the six a central difference costs — the half-step bias that buys is
+  meaningless when there is no true surface being approximated, only a field being borrowed.
+- **The gradient is projected onto the surface before it tilts anything.** [[water]] can treat the
+  world axes as its tangent frame because a plate is always level; nothing on the terrain can, and
+  `GridPlane` means the grid does not have to lie in the same plane from one run to the next.
+  Removing the component along `N` is what makes one function serve caps and walls alike.
+- **The sample step wanted to be *smaller*, which was the opposite of the guess.** Reasoning that a
+  step of 0.02 noise units is about three pixels and therefore "sub-pixel noise", it was swept
+  against 0.06 and 0.14. Measured against a bump-free frame, 0.02 changed 50.7% of the terrain at a
+  median of 6 levels of 255, against 43.5%/5 and 31.0%/4. The finest octaves are what read as a
+  surface; the broad tilt is what reads as nothing.
+- **It fades with distance**, the same guard [[water]] puts on its ripples and for the same recorded
+  reason: below a pixel the pattern becomes crawling shimmer, and from any altitude most of the
+  terrain on screen is past that point. Not verified in motion — the captures are still frames.
+- **The build directory is shared between worktrees, and that can serve the wrong binary.**
+  `.cargo/config.toml` points every worktree at `~/.cargo/hex-terrain-build`; see
+  [[build-performance]]. After an accidental `cargo run` from the primary checkout, `cargo run` in a
+  worktree reported `Finished` in 0.24s and then ran a binary that **rejected a scene the worktree's
+  own source defines** — `--scene biomes` came back "possible values: sea, two-lakes, terraces".
+  `touch`ing a source file and rebuilding fixed it. The symptom to watch for is a build that finishes
+  suspiciously fast after changing only assets, and the cheap guard is to assert the screenshot
+  actually appeared rather than trusting the run.
+- **This is the likeliest explanation for the phantom measurement in the previous entry**, where a
+  control frame differed from every other by 173 of 255 for no reason the code could account for.
+  Recorded as likely rather than proven: the frame was not kept and the state cannot be reproduced.
+- Verified: 100 tests, `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`. Frame rate is vsync-capped at 60 both with and without the bump, so that
+  only shows the three extra noise evaluations do not breach 60 at this scene size — it is not a
+  measurement of their cost.
+
+## [2026-08-14] fix | the shader that was never fetched
+
+`biomes` rendered correctly natively and, in a browser under `trunk serve`, drew no caps and no
+walls at all. The hexes read as open shells. Everything else — skirts, water, UI, gizmos — was fine.
+The shader was the obvious suspect and was the wrong one.
+
+- **The shader was never loaded.** Bevy probes `<asset>.meta` before every asset. `trunk serve`
+  answers a missing path with `index.html` and a `200`; Bevy takes that as meta, fails to
+  deserialize it, and **abandons the asset**, so `terrain.wgsl` is never requested at all. One
+  `ERROR Failed to deserialize meta ... ExpectedNamedStructLike("AssetMetaMinimal")` line is the
+  entire signal — no pipeline error, no shader error, no warning.
+- **That line was already in the notes as "normal and harmless"**, recorded from the GitHub Pages
+  deploy where it genuinely is: Pages answers a real 404 and Bevy ignores the probe. The claim was
+  true of one host and false of the other, and carrying it forward cost a whole session of shader
+  bisecting. [[build-performance]] now says which hosts it holds for.
+- **The bisect could not have worked, and its own evidence said so.** Replacing the fragment body
+  with solid red changed nothing — which was read as "the fragment shader is skipped" when it meant
+  "this file is not being read". A test whose negative result is the same for every input is not
+  measuring the thing.
+- **The check that ends it in a minute**, in the page console:
+  `performance.getEntriesByType('resource').filter(e => /wgsl/.test(e.name)).map(e => e.name)`.
+  Only `.meta` entries and no entry for the shader itself is the whole diagnosis. Reach for it
+  before touching shader source whenever a material silently fails to draw on the web.
+- **`WGPU_SETTINGS_PRIO=webgl2` reproduces WebGL2 *limits* natively** and was worth the two minutes
+  it took: it renders `biomes` correctly, which ruled out the limits and pointed away from the
+  shader early. It needs a small window — the default 1280x720 at scale factor 2 asks for a
+  2560-wide surface and WebGL2 caps textures at 2048. It cannot reproduce the GLSL translation
+  itself; `WGPU_BACKEND=gl` is not available in this build (no GPU found on either driver).
+- **Fix:** `AssetPlugin { meta_check: AssetMetaCheck::Never, .. }` in `main.rs`. No asset here has a
+  `.meta` file, so the probe could only ever cost two round trips and, on the wrong host, the render.
+- Native is unchanged, as it must be: same frame at `WGPU_SETTINGS_PRIO=webgl2` before and after
+  differs by a maximum of 1.7 levels of 255 and a mean of 0.006, which is the sky's dither.
+- Verified: 100 tests, `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`, and the browser check [[biomes]] was waiting on.
