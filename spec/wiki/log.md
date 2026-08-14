@@ -687,3 +687,37 @@ merely against the consumer — is now in [[bevy-0-19-api]].
 - Verified: 99 tests, `cargo clippy --all-targets` clean. `WALL_SHADE` stays at 0.78 and is now
   documented as a deliberate thumb on the scale, since the measurement above shows the lighting
   cannot supply that difference on its own.
+
+## [2026-08-14] feature | three biomes blended across a wall, and an ordering that was not needed
+
+- **A wall carries its blend, a cap carries its biome.** `wall_mesh` writes a weight triple per
+  vertex into the colour channel and packs the three biomes it blends into `uv.x` as `a + 8b + 64c`.
+  Weights come from what each vertex stands on: a cap corner is this location's alone, a bridge end
+  is the midpoint of two caps, and the lattice vertex is the point three meet at — already the
+  centroid of the three cap corners in plan, because they are inset along directions 120° apart
+  which sum to zero. One triple serves all four triangles of a sector.
+- **The canonical ordering the design called for turned out to be unnecessary.** The plan was to sort
+  the three cells of a wedge by `(q, r)`, as `mean_height` does for heights, so two locations agree
+  on which weight belongs to which cell. Two facts make it moot: the weights at every *shared* point
+  are symmetric — a half each along an edge, a third each at a lattice vertex — so the slot a cell
+  occupies cannot change their sum; and the shader perturbs each weight by noise keyed to the
+  **biome identity** rather than to the slot, which is the one place ordering could have leaked back
+  in. Keying the noise that way is deliberate and load-bearing, not incidental.
+- **The seam test compares the resolved mix, not the triple.** `neighbours_resolve_the_same_biome_mix_on_every_shared_vertex`
+  buckets every wall vertex by world position, unpacks the identities, accumulates weight per biome,
+  and asserts two locations reaching the same point agree **bitwise** — which they do, across all
+  four layouts. That is the same standard `cells_agree_on_every_shared_edge_and_corner` holds heights
+  to. Confirmed to bite: replacing the lattice vertex's `(⅓,⅓,⅓)` with an asymmetric triple fails it
+  with the offending pair and position.
+- **Packing identities into `uv.x` is safe because they are constant across a triangle.** An
+  interpolated attribute returns a constant exactly, so the unpack cannot land between two values.
+- **The wall lost its own colour, and two constants with it.** `WALL_SHADE` and `biome_wall_fill` are
+  gone: a wall now takes the same palette the caps do, and what makes it read darker is the tilt of
+  its normal, which the renderer was already doing. Five wall materials collapsed to one, since
+  nothing about a wall's material varies per location any more.
+- Verified: 100 tests (93 lib, 7 binary), `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`. Measured on `biomes` at 1280x720 `iso` against the step-3 frame: the blend
+  moves 28.2% of the visible terrain at a median of 10 levels of 255 and a 99th percentile of 59; the
+  perturbation on top of it moves a further 15.3% at a median of 7. **Not verified:** a browser on
+  WebGL2, still deferred to the end — and `#ifdef VERTEX_COLORS` selecting the wall path inside a
+  material extension is exactly the kind of thing that could translate differently there.

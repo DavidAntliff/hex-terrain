@@ -154,9 +154,11 @@ colour from a per-biome material; walls carry one and blend from a palette unifo
 VERTEX_COLORS` — a shader def the mesh pipeline sets from the vertex layout — picks the path, so one
 `terrain.wgsl` serves both and there is no second material type.
 
-**Attribute budget, fixed up front so the steps do not rework each other.** The wall mesh's
-`ATTRIBUTE_COLOR` carries three blend weights. The fourth component was reserved for an
-ambient-occlusion scalar, which was built and then removed — see below.
+**Attribute budget.** The wall mesh's `ATTRIBUTE_COLOR` carries three blend weights, and `uv.x`
+carries the three biomes they belong to packed as `a + 8b + 64c`. The packed value is constant
+across a triangle, so interpolating it returns it exactly — which is what lets identities share a
+channel with anything interpolated at all. The colour channel's fourth component was reserved for an
+ambient-occlusion scalar, which was built and then removed; see below.
 Biome identities pack into `uv.x` as `a + 8*b + 64*c`, where the walls currently write an unused
 placeholder. Identities are constant across a triangle, so interpolating them returns them exactly.
 
@@ -202,12 +204,19 @@ A single `TerrainLook` resource holds every shader tunable, written into the mat
 shader as a uniform taken from `HexLayout::plane`, keeping `GridPlane` knowledge in the view.
 
 **Blend weights** — assigned by vertex role in `wall_mesh`: a cap corner is `(1,0,0)`, a bridge end
-`(½,½,0)`, a lattice vertex `(⅓,⅓,⅓)`. The three cells meeting at a wedge must be ordered
-identically from all three sides or the interpolation cracks along the internal seams; `mean_height`
-already solves this for heights by sorting on `(q, r)` before summing, and that ordering is factored
-into a shared helper so heights and biomes cannot drift apart. At the rim, fewer than three cells
-present means weights over what is present — the same rule `mean_height` uses, needing no special
-case.
+`(½,½,0)`, a lattice vertex `(⅓,⅓,⅓)`. At the rim, fewer than three cells present means weights over
+what is present — the same rule `mean_height` uses, needing no special case, and the reason a
+missing neighbour must be *dropped* rather than replaced by this cell's own biome. Replacing it
+would have each of two cells weight itself double at a shared corner and the seam would part.
+
+**A canonical ordering turned out not to be needed, which was not the expectation.** The plan was to
+sort the three cells by `(q, r)` as `mean_height` does, so that two locations listing the same wedge
+agree on which weight belongs to which cell. It is unnecessary, for two reasons that hold together:
+the weights at every *shared* point are symmetric — a half each along an edge, a third each at a
+lattice vertex — so which cell occupies which slot cannot change their sum; and the shader keys its
+perturbation to the **biome identity** rather than to the slot, so the one place ordering could have
+leaked back in does not. Both cells therefore compute the same colour from differently ordered
+inputs. A test asserts it rather than the argument being trusted.
 
 **Panel** — sliders follow the existing five-point recipe: resource, `init_resource`, a `Control`
 variant, a `spawn_slider` call, and arms in `on_slider_changed` and `update_captions`, the latter
@@ -256,7 +265,15 @@ started. No divergence known.
   third of that on a fifth of the wall vertices, which came to three levels. Cut rather than
   reproduced by darkening albedo instead: that would dim a crease in full sunlight too, which is
   what makes vertex AO look painted on. Revisit only if the lighting stops being sun-dominated.
-- **Steps 4 and 5**: the blend across the wall, and normal perturbation. Not started.
+- **Step 4, the blend across the wall: done.** `wall_mesh` writes a weight triple per vertex and the
+  three biomes it blends, and the shader mixes them out of a palette uniform, perturbing the weights
+  by noise and sharpening before renormalising so the boundary interlocks rather than crossfading.
+  Walls collapsed from five materials to **one**, since a wall no longer has a colour of its own.
+  `WALL_SHADE` and `biome_wall_fill` went with them: a wall now takes the same colours as the caps
+  it joins, and what makes it read darker is the tilt of its normal, which the renderer already
+  does. Measured on `biomes`, the blend moves 28% of the visible terrain at a median of 10 levels of
+  255, and the perturbation a further 15% at a median of 7.
+- **Step 5**: normal perturbation. Not started.
 - **Not verified anywhere yet**: the shader in a browser on WebGL2, which per the constraints above
   is the only check that proves the WGSL translates. Deferred to the end of the procedural work
   rather than repeated per step.

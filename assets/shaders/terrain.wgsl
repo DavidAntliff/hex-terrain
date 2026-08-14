@@ -18,6 +18,9 @@
 }
 
 struct TerrainSettings {
+    // Every biome's colour, indexed the way `Biome::index` orders them, linear. Only a wall reads
+    // it — a cap carries its one biome in its own base colour — but both share this struct.
+    palette: array<vec4<f32>, 5>,
     // The colour of exposed rock, **linear** — it is mixed against a base colour the material has
     // already converted out of sRGB, so it has to arrive in the same space.
     rock: vec3<f32>,
@@ -34,6 +37,10 @@ struct TerrainSettings {
     // units of `1 - dot(N, up)`: level is 0, a 45 degree face is 0.29, and vertical is 1.
     rock_onset: f32,
     rock_width: f32,
+    // How far the noise may push a blend weight either side of what the geometry says, and the
+    // exponent the weights are raised to before being normalised again.
+    blend_noise: f32,
+    blend_sharpness: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainSettings;
@@ -130,19 +137,66 @@ fn fbm(p: vec3<f32>) -> f32 {
 // hard the sum concentrates.
 const SWING_PER_AMPLITUDE: f32 = 0.30;
 
+// Three biomes mixed by weight, with the boundary between them broken up.
+//
+// A straight `mix` of the weights the geometry gives is a linear crossfade, and reads as an
+// airbrushed gradient at exactly the place the eye goes. Perturbing each weight by noise and then
+// sharpening makes the boundary interlock instead — one biome fingers into the next, and pockets of
+// each appear inside the other.
+//
+// **The perturbation is keyed to the biome, not to the slot it happens to occupy.** Two locations
+// meeting at a seam list the same three cells in different orders, and a weight is only well
+// defined up to that ordering; keying the noise to the identity makes both sides compute the same
+// colour without either having to know how the other ordered them. The weights themselves are
+// symmetric at every shared point — a half each along an edge, a third each at a lattice vertex —
+// so nothing else about the ordering matters either.
+fn blend(world_position: vec3<f32>, weights: vec3<f32>, ids: vec3<u32>) -> vec3<f32> {
+    let p = world_position / terrain.tint_wavelength;
+    // One octave is enough: this only has to make an edge wander, not carry detail of its own.
+    let jitter = vec3(
+        value_noise(p + vec3(f32(ids.x) * 37.1, 0.0, 0.0)),
+        value_noise(p + vec3(f32(ids.y) * 37.1, 0.0, 0.0)),
+        value_noise(p + vec3(f32(ids.z) * 37.1, 0.0, 0.0)),
+    );
+
+    var w = max(weights + (jitter - 0.5) * terrain.blend_noise, vec3(0.0));
+    w = pow(w, vec3(terrain.blend_sharpness));
+    w = w / max(w.x + w.y + w.z, 1e-5);
+
+    return w.x * terrain.palette[ids.x].rgb
+        + w.y * terrain.palette[ids.y].rgb
+        + w.z * terrain.palette[ids.z].rgb;
+}
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 
-    // Rock first, because it decides *which material* this fragment is; the tint then varies
-    // whichever one that turned out to be. A steep face is bare rock whatever grows on the flat
-    // ground above it, which is why this is a slope test and not a biome — the `Rock` biome is a
-    // band of elevation and happens to look similar, but the two are answering different questions.
-    // Caps need no exemption: they are level, so their slope is zero and the mix never fires.
+    let base = pbr_input.material.base_color;
+
+#ifdef VERTEX_COLORS
+    // A wall, which spans up to three locations and so cannot have one colour. The weights arrive
+    // per vertex and the three biomes they belong to are packed into `uv.x`, constant across the
+    // triangle and therefore interpolated exactly.
+    //
+    // Note that the standard material has already multiplied `base` by these weights, which is
+    // meaningless. That product is discarded here rather than prevented; preventing it would mean
+    // a specialized vertex layout for no gain.
+    let packed = u32(in.uv.x + 0.5);
+    let ids = vec3<u32>(packed % 8u, (packed / 8u) % 8u, (packed / 64u) % 8u);
+    let surface = blend(in.world_position.xyz, in.color.rgb, ids);
+#else
+    // A cap, which is one biome throughout and carries it in its own base colour.
+    let surface = base.rgb;
+#endif
+
+    // Rock last of the three, because it overrides whichever material the ground turned out to be.
+    // A steep face is bare rock whatever grows on the flat ground above it, which is why this is a
+    // slope test and not a biome — the `Rock` biome is a band of elevation and only looks similar
+    // by coincidence. Caps need no exemption: they are level, so the mix never fires on one.
     let slope = 1.0 - dot(pbr_input.N, terrain.up);
     let bare = smoothstep(terrain.rock_onset, terrain.rock_onset + terrain.rock_width, slope);
-    let base = pbr_input.material.base_color;
-    let material = mix(base.rgb, terrain.rock, bare);
+    let material = mix(surface, terrain.rock, bare);
 
     // Multiplicative, and in linear space, so the material's hue survives and only its brightness
     // moves. Mixing towards a second colour instead would make everything drift towards that one
