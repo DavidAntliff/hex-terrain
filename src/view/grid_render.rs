@@ -1,8 +1,8 @@
 //! Draws the grid as a continuous surface, one cell at a time.
 //!
-//! A location's territory is its **full** hexagon. Its cap is that hexagon shrunk by [`INSET`] and
-//! lifted to the location's height; the ring between the two is its wall, and every cell emits the
-//! same thirty triangles with no rule deciding who owns what.
+//! A location's territory is its **full** hexagon. Its cap is that hexagon shrunk by
+//! [`HexLayout::inset`] and lifted to the location's height; the ring between the two is its wall,
+//! and every cell emits the same thirty triangles with no rule deciding who owns what.
 //!
 //! The gaps an inset hexagon leaves are of two kinds, and so is the wall. Along each edge sits a
 //! **bridge**, half of the ramp down to the neighbour's cap, level along its length at the mean of
@@ -149,14 +149,6 @@ const ACTIVE_EDGE: Color = Color::srgb(1.0, 0.78, 0.25);
 const EDGE_WIDTH: f32 = 1.5;
 const ACTIVE_EDGE_WIDTH: f32 = 6.0;
 
-/// How far each cap is shrunk towards its centre, as a fraction of the circumradius. The spacing is
-/// untouched, so this is what opens up the wall between neighbours and gives it its incline.
-///
-/// A fraction, not a world distance: the meshes are built at unit scale and stretched by a
-/// `Transform`, which would scale an absolute inset along with everything else.
-// ponytail: one inset for the whole grid. Move it onto `Terrain` when a location needs its own.
-const INSET: f32 = 0.08;
-
 /// One rendered location: the parent of its cap and its wall.
 ///
 /// Carries the transform and the visibility both children inherit, so hiding a location — or
@@ -257,7 +249,7 @@ pub fn spawn_grid(
     layout: Res<HexLayout>,
 ) {
     let shared = SharedAssets {
-        cap: meshes.add(hex_fan_mesh(&layout, 1.0 - INSET)),
+        cap: meshes.add(hex_fan_mesh(&layout, 1.0 - layout.inset)),
         water_material: water_materials.add(WaterMaterial {
             base: StandardMaterial {
                 base_color: WATER_FILL,
@@ -475,10 +467,10 @@ fn cell_transform(layout: &HexLayout, coord: Axial) -> Transform {
     Transform::from_translation(layout.hex_to_world(coord)).with_scale(layout.mesh_scale())
 }
 
-/// Keeps the cells in step when the layout changes — its scale, height scale, or orientation.
+/// Keeps the cells in step when the layout changes — its scale, height scale, orientation or inset.
 ///
-/// The meshes only really need rebuilding when the orientation changes, since a scale change is
-/// pure `Transform`.
+/// The meshes only really need rebuilding when the orientation or the inset changes; a scale change
+/// is pure `Transform`.
 // ponytail: rebuilds on any layout change rather than tracking which field moved. Thirty-seven
 // cells of twelve triangles is nothing; revisit if the grid grows or the layout animates.
 pub fn sync_cells(
@@ -503,7 +495,7 @@ pub fn sync_cells(
     if let Some(shared) = shared
         && let Some(mut mesh) = meshes.get_mut(&shared.cap)
     {
-        *mesh = hex_fan_mesh(&layout, 1.0 - INSET);
+        *mesh = hex_fan_mesh(&layout, 1.0 - layout.inset);
     }
 
     for (wall, handle) in &walls {
@@ -583,7 +575,7 @@ pub fn draw_outlines(
 /// sits *below* its level rather than above it.
 fn outline_corners(layout: &HexLayout, coord: Axial, terrain: Terrain) -> [Vec3; 6] {
     let centre = layout.surface_centre(coord, terrain.surface() + 2.0 * WATER_TIE_BREAK);
-    layout.corner_offsets().map(|o| centre + o * (1.0 - INSET))
+    layout.corner_offsets().map(|o| centre + o * (1.0 - layout.inset))
 }
 
 /// A flat hexagon at the given fraction of the circumradius, as a fan of six triangles about its
@@ -681,7 +673,7 @@ fn wall_mesh(layout: &HexLayout, grid: &TerrainGrid, coord: Axial) -> Mesh {
     let up = unit.plane.normal();
     let height = grid.get(coord).map_or(0.0, |l| l.data.height);
 
-    let cap: [Vec3; 6] = core::array::from_fn(|j| corners[j] * (1.0 - INSET) + up * height);
+    let cap: [Vec3; 6] = core::array::from_fn(|j| corners[j] * (1.0 - layout.inset) + up * height);
     let profile: [Profile; 6] = core::array::from_fn(|j| edge_profile(layout, grid, coord, j));
 
     let mut faces = Faces::with_capacity(24);
@@ -723,14 +715,15 @@ fn edge_profile(layout: &HexLayout, grid: &TerrainGrid, coord: Axial, j: usize) 
     let unit = layout.unit();
     let corners = unit.corner_offsets();
     let up = unit.plane.normal();
+    let inset = layout.inset;
     let k = (j + 1) % 6;
 
     let bridge = up * edge_height(layout, grid, coord, j);
     [
         corners[j] + up * corner_height(layout, grid, coord, j),
-        corners[j] * (1.0 - INSET / 2.0) + corners[k] * (INSET / 2.0) + bridge,
+        corners[j] * (1.0 - inset / 2.0) + corners[k] * (inset / 2.0) + bridge,
         (corners[j] + corners[k]) * 0.5 + bridge,
-        corners[k] * (1.0 - INSET / 2.0) + corners[j] * (INSET / 2.0) + bridge,
+        corners[k] * (1.0 - inset / 2.0) + corners[j] * (inset / 2.0) + bridge,
         corners[k] + up * corner_height(layout, grid, coord, k),
     ]
 }
@@ -1041,7 +1034,7 @@ mod tests {
         let grid = grid();
         for layout in layouts() {
             let lowest = lowest_height(&grid);
-            let mut meshes = vec![hex_fan_mesh(&layout, 1.0 - INSET)];
+            let mut meshes = vec![hex_fan_mesh(&layout, 1.0 - layout.inset)];
             meshes.extend(grid.coords().map(|c| wall_mesh(&layout, &grid, c)));
             meshes.extend(grid.coords().map(|c| skirt_mesh(&layout, &grid, c, lowest)));
             for mesh in &meshes {
@@ -1062,7 +1055,7 @@ mod tests {
         let grid = grid();
         for layout in layouts() {
             let up = layout.plane.normal();
-            for (_, normal) in triangles(&hex_fan_mesh(&layout, 1.0 - INSET)) {
+            for (_, normal) in triangles(&hex_fan_mesh(&layout, 1.0 - layout.inset)) {
                 assert!(normal.abs_diff_eq(up, EPS), "a cap should be level");
             }
             for coord in grid.coords() {
@@ -1190,6 +1183,35 @@ mod tests {
             // The circumradius is 1 in the unit frame, and the outer ring lies exactly on it.
             assert!((reach - 1.0).abs() < EPS, "{coord:?} reaches {reach}");
         }
+    }
+
+    /// The inset knob's whole job: a larger one shrinks every cap, and does it without moving the
+    /// hexagon the location owns — the spacing is untouched, so the wall's outer rim stays on the
+    /// circumradius and the wall simply gets wider.
+    #[test]
+    fn a_larger_inset_shrinks_the_cap_and_leaves_the_territory_alone() {
+        let grid = grid();
+        let narrow = HexLayout::pointy(1.0).with_inset(0.05);
+        let wide = narrow.with_inset(0.25);
+
+        let reach = |mesh: &Mesh, layout: &HexLayout| {
+            positions(mesh)
+                .iter()
+                .map(|v| layout.plane.to_plane(*v).length())
+                .fold(0.0f32, f32::max)
+        };
+
+        let cap = |layout: &HexLayout| reach(&hex_fan_mesh(layout, 1.0 - layout.inset), layout);
+        assert!(
+            cap(&wide) < cap(&narrow),
+            "{} is not smaller than {}",
+            cap(&wide),
+            cap(&narrow)
+        );
+
+        let rim = |layout: &HexLayout| reach(&wall_mesh(layout, &grid, Axial::ZERO), layout);
+        assert!((rim(&wide) - 1.0).abs() < EPS);
+        assert!((rim(&narrow) - 1.0).abs() < EPS);
     }
 
     /// A water surface has to reach one ring beyond the locations that are actually flooded, and
@@ -1677,6 +1699,6 @@ mod tests {
                 assert!((v.y - -0.4).abs() < EPS, "{v:?} should be level with the cap");
             }
         }
-        assert_eq!(triangles(&hex_fan_mesh(&layout, 1.0 - INSET)).len(), 6);
+        assert_eq!(triangles(&hex_fan_mesh(&layout, 1.0 - layout.inset)).len(), 6);
     }
 }

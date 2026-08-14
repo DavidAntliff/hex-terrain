@@ -2,7 +2,7 @@
 tags: [scene, camera, skybox, spec]
 type: spec
 status: implemented
-updated: 2026-08-13
+updated: 2026-08-14
 ---
 # Spec: Scene shell
 
@@ -23,13 +23,17 @@ any static web server, renders identically in Firefox and Chrome.
 ### Constraints
 
 - **One dependency for the shell.** `bevy` only. No third-party camera-controller, math, or asset
-  crates — behaviour that costs a few dozen lines is written here instead. Amended once, by
-  agreement: `serde` and `serde_json` are admitted for the scene report, which is
-  [[instrumentation]]'s and is not part of the shell. The reasoning is on that page; the rule here
-  is unchanged for everything the shell itself does, and there is still no CLI crate.
+  crates — behaviour that costs a few dozen lines is written here instead. Amended twice, by
+  agreement:
+  - `serde` and `serde_json` are admitted for the scene report, which is [[instrumentation]]'s and
+    is not part of the shell. The reasoning is on that page.
+  - `clap` is admitted for argument parsing, once the shell grew a second argument. See *A named
+    scene and an inset override* below for what changed the arithmetic.
   - A Bevy **feature** is not a third-party crate. `features = ["free_camera"]` on the `bevy`
     dependency pulls the first-party `bevy_camera_controller`, and the dependency list is still one
     line long. See [[camera-controls]].
+
+  The rule is otherwise unchanged: behaviour worth a few dozen lines is still written here.
 - **Web parity is non-negotiable.** Anything added must build for `wasm32-unknown-unknown`.
   This rules out several conveniences; see Design discussion.
 - **A fresh clone must run** with no asset-generation step.
@@ -118,18 +122,30 @@ matching Bevy, which removes a real version-mismatch failure mode. The alternati
 `wasm-bindgen` directly behind a small script — requires keeping `wasm-bindgen-cli` pinned to
 Bevy's `wasm-bindgen` by hand on every upgrade. Locked.
 
-**A named scene, chosen by one positional argument.** A grid built to isolate one rendering question
-is worth keeping, and worth having beside the sandbox rather than instead of it, so scenes are a
-named set and the shell loads one of them. The shell owns only the *choice*; what a scene contains,
-and every height and water level in it, is the model's — see [[terrain]].
+**A named scene and an inset override, parsed by `clap`.** A grid built to isolate one rendering
+question is worth keeping, and worth having beside the sandbox rather than instead of it, so scenes
+are a named set and the shell loads one of them. The shell owns only the *choice*; what a scene
+contains, and every height and water level in it, is the model's — see [[terrain]].
 
-Selection is `std::env::args().nth(1)` against a table, defaulting to the sandbox. Not a CLI crate:
-the one-dependency constraint stands, and one positional name is the whole interface. Not an
-environment variable either, despite `HEX_TERRAIN_SCREENSHOT` being the existing precedent — that
-one configures a *mode* the app can be put into from a script, whereas this picks what to run, which
-is what an argument is for. The web build has no argv and therefore always gets the default, which
-is a real limitation rather than an oversight: a scene worth showing in a browser has to become the
-default, or be selectable in the panel. Locked.
+Selection is not an environment variable, despite `HEX_TERRAIN_SCREENSHOT` being the existing
+precedent — that one configures a *mode* the app can be put into from a script, whereas this picks
+what to run, which is what an argument is for. That much is unchanged and stays locked.
+
+**Superseding the earlier "one positional argument, not a CLI crate" decision.** That decision
+rested on there being exactly one argument: with a single positional name there is no grammar to
+get wrong, no `--help` worth printing, and `std::env::args().nth(1)` is the whole parser. A second
+argument — `--inset`, from [[terrain]] — breaks all three premises at once. Ordering, an absent
+value, and a value out of range all become real cases; the valid scene names have to be printed in
+two places (the error and a `--help` that now has something to say); and `nth(1)` stops meaning
+anything, which was already quietly wrong in `probe`, where the report re-read it to learn the
+scene name. `clap` is one line of `Cargo.toml` against a hand-rolled parser that would grow every
+time a knob is added. Locked at two arguments: a third knob is a prompt to ask whether it belongs
+in the panel instead.
+
+The web build has no argv and therefore always gets the defaults, which is a real limitation rather
+than an oversight: a scene worth showing in a browser has to become the default, or be selectable
+in the panel. The inset took the second route — it is a panel slider as well as an argument, and
+that is the only way to reach it on web.
 
 ## Implementation details
 
@@ -163,19 +179,28 @@ lives in `src/sky.rs`, the camera in `src/camera.rs`, and everything a script dr
   Everything else about moving the camera, including `FreeCameraPlugin`, is [[camera-controls]]'.
 - `exit_on_escape` — writes `AppExit::Success`, which is the graceful path: Bevy finishes the
   frame, drops the world and closes the window itself.
-- `named_scene` — resolves the first argument through `hex::scenes::build`, or exits 2 listing the
-  names. Called **before** `App::new()`, so a mistyped name costs the message and not a GPU
-  initialisation. The scenes themselves are model data in `src/hex/scenes.rs`: a `SCENES` table of
-  `(name, fn() -> TerrainGrid)`, `DEFAULT`, and the grid radius, which lives there rather than in
-  `view` because a grid's extent is dimensionless.
-  - Tests must not call it. Under `cargo test` the first argument is the test-name filter, so it
-    would exit the harness.
+- `Cli` — the derived parser, with `--scene` and `--inset`. Parsed **before** `App::new()`, so a
+  mistyped argument costs the message and not a GPU initialisation, and exits 2 as the hand-rolled
+  parser did.
+  - `--scene` carries a `PossibleValuesParser` built from `scenes::names()`, so the valid list is
+    generated rather than written out: it reaches both `--help` and the error for a bad name, and
+    `scenes::build` afterwards cannot fail. The scenes themselves are model data in
+    `src/hex/scenes.rs`: a `SCENES` table of `(name, fn() -> TerrainGrid)`, `DEFAULT`, and the grid
+    radius, which lives there rather than in `view` because a grid's extent is dimensionless.
+  - `--inset` takes a **percentage** and `inset_percent` converts it to the fraction
+    `HexLayout::inset` holds, rejecting anything outside `0..=50` rather than clamping. The ceiling
+    matches the panel slider's so the two knobs reach the same places. See [[terrain]].
+  - `long_about = None`, so the struct's doc comment stays out of `--help` — it is written for a
+    reader of the source.
+  - **Tests must call `try_parse_from`, never `parse`.** Under `cargo test` the first argument is
+    the test-name filter, so `parse` would exit the harness on `cargo test some_filter`.
 - `ProbePlugin` — the scripted-observation mode, specified in [[instrumentation]]. It lives here in
   outline only because the shell adds it and because the reason for its existence is the shell's:
   capturing the window through the X server is unreliable, since a window on an inactive workspace
   is unmapped and yields a blank image, so scripted visual verification has to come from inside the
   app. `main` additionally reads `HEX_TERRAIN_WINDOW` to pin the window size, the window being its
-  to configure.
+  to configure. It is constructed as `ProbePlugin::for_scene(cli.scene)`: the report names the
+  scene, and `main` is the only place that knows which one the arguments resolved to.
 
 The crate is a **library plus a binary** (`src/lib.rs`, `src/main.rs`). The split is what makes
 the model a real API boundary rather than a convention, and it keeps the compiler honest — public
@@ -207,9 +232,17 @@ Performed:
   WebGL2, which is the check the whole sky and [[water]] design is shaped around.
 - `python3 tools/make_skybox.py --check` — the projection asserts pass. Still run, though the
   starfield is no longer the scene's sky.
-- Scene selection — `cargo run` gives the sandbox unchanged; `cargo run -- two-lakes` gives that
-  scene; `cargo run -- nope` prints `unknown scene "nope"; one of: sea, two-lakes` and exits 2
-  without opening a window. A test asserts every registered name builds a grid of 37 locations.
+- Arguments — `cargo run` gives the sandbox at the default inset; `cargo run -- --scene two-lakes`
+  gives that scene; `--scene nope`, `--inset 80` and `--inset wide` each print a `clap` error
+  naming what was valid and exit 2 without opening a window; `--help` lists both flags and the
+  three scene names. A test asserts every registered name builds a grid of 37 locations, and four
+  more cover the parser through `try_parse_from` — including `Cli::command().debug_assert()`.
+- The argv rule — `cargo test the_inset` runs one test and does not exit the harness, which is the
+  failure the `try_parse_from` discipline exists to prevent.
+- `--inset` reaches the geometry — with `HEX_TERRAIN_REPORT`, `layout.inset` reads `0.25` for
+  `--inset 25` and `0.08` with the flag absent, and `run.scene` reads `two-lakes` rather than the
+  first argv word. Screenshots at both values show caps, walls, skirts and outlines moving
+  together.
 
 Not verified: a physical Escape keypress. No key-injection tool was available, so the input paths
 are covered by the headless test and by inspection only. The same limitation applies to the camera,
@@ -232,7 +265,8 @@ Deliberate omissions, each marked with a `ponytail:` comment at the relevant sit
   the sky itself, so the water reflects the sky's grading but not its solar halo.
 - The starfield cubemap is still committed and its generator still works, but nothing loads either.
 - A scene can only be chosen at startup, and only natively. There is no in-app scene switcher, so
-  the web build shows the default and nothing else.
+  the web build shows the default and nothing else. The inset avoids this by being a panel slider
+  as well as an argument.
 
 The camera's default `radius` and the compass placement are tuned together so that both fit the
 default view. The horizontal extent of the view depends on window aspect ratio, so a widget placed

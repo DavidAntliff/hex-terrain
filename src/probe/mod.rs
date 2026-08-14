@@ -95,7 +95,19 @@ impl Schedule {
 }
 
 /// Enables the scripted-observation variables. Does nothing when none of them are set.
-pub struct ProbePlugin;
+///
+/// Carries the scene name because the report records it and the probe has no way to learn it
+/// otherwise: `main` resolves the arguments, and re-reading `argv` here would only guess at what
+/// they meant.
+pub struct ProbePlugin {
+    scene: String,
+}
+
+impl ProbePlugin {
+    pub fn for_scene(scene: String) -> Self {
+        Self { scene }
+    }
+}
 
 impl Plugin for ProbePlugin {
     fn build(&self, app: &mut App) {
@@ -126,9 +138,7 @@ impl Plugin for ProbePlugin {
             next: 0,
             image,
             report,
-            // The scene name as the app was invoked with it, for the report. Resolved by
-            // `main::named_scene`, which has already exited if it was not a real name.
-            scene: std::env::args().nth(1).unwrap_or_else(|| "default".into()),
+            scene: self.scene.clone(),
             frames_left: SETTLE_FRAMES,
             captured: false,
             frame: 0,

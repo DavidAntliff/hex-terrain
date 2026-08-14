@@ -35,9 +35,10 @@ Turning is on the middle button rather than Unity's `Alt`+left because i3 — an
 managers — grab `Alt`+drag for themselves before the app ever sees it.
 
 The panel top right reports the selected hexagon in axial, cube and doubled coordinates plus world
-position, and carries six controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
+position, and carries seven controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
 pointy-top against flat-top, show or hide the axis compass, hide the skirt to see the terrain as a
-bare shell, move the sea level, and reset the view to look straight down with everything in frame.
+bare shell, move the sea level, shrink or widen the cap inset, and reset the view to look straight
+down with everything in frame.
 
 See `spec/camera-controls.md` for why the bindings are these ones.
 
@@ -50,7 +51,7 @@ optional and off by default, so a plain `cargo run` is unaffected.
     HEX_TERRAIN_SCREENSHOT=/tmp/s.png \
     HEX_TERRAIN_REPORT=/tmp/s.json \
     HEX_TERRAIN_WINDOW=1280x720 \
-      cargo run -- two-lakes
+      cargo run -- --scene two-lakes
 
 | Variable                 | Value                    | Effect                                          |
 | ------------------------ | ------------------------ | ----------------------------------------------- |
@@ -84,11 +85,15 @@ See `spec/instrumentation.md` for the details.
 
 ## Native
 
-    cargo run                 # the `sea` scene
-    cargo run -- two-lakes    # or any other scene name
+    cargo run                              # the `sea` scene
+    cargo run -- --scene two-lakes         # or any other scene name
+    cargo run -- --inset 25                # wider walls, smaller caps
+    cargo run -- --help
 
-Scenes are named grids in `src/hex/scenes.rs`; an unknown name lists the valid ones. The web build has
-no arguments and always shows the default.
+Scenes are named grids in `src/hex/scenes.rs`; an unknown name lists the valid ones. `--inset` is a
+percentage of the hexagon's circumradius, `0`–`50`, defaulting to 8 — the same knob as the panel's
+inset slider. The web build has no arguments and always shows the defaults, so the slider is the
+only way to reach the inset there.
 
 - `sea` — the sandbox: undulating ground flooded to a single level, driven by the panel's slider.
 - `two-lakes` — two bodies at different levels divided by a land bridge one hex wide.

@@ -1,7 +1,7 @@
 ---
 tags: [build, tooling, concept]
 type: concept
-updated: 2026-08-13
+updated: 2026-08-14
 ---
 # Build performance
 
@@ -88,6 +88,17 @@ which is why it was not worth measuring properly.
 Re-measured after the assets narrowing, on 2026-08-13: `dist/*_bg.wasm` is 52,367,266 bytes and
 `dist/assets/shaders/water.wgsl` is 5,161 bytes, so the deployed bundle went from ~63 MB to ~50 MB
 without touching the wasm.
+
+**`clap` costs about a quarter of a megabyte of wasm.** Measured on 2026-08-14, the one controlled
+before/after this file has: `dist/*_bg.wasm` went from 52,367,266 to 52,613,917 bytes when `clap`
+was added for [[scene]]'s arguments — **+246,651 bytes, 0.47%** — with default features and the
+`derive` feature, on a build where nothing else changed. It is dead weight on web, since there is
+no argv there, but scoping the dependency to non-wasm would buy 0.5% at the price of a second code
+path, so it is unconditional. Worth revisiting only alongside `wasm-opt`, which is aimed at a much
+larger number.
+
+Adding it also invalidates `Cargo.lock`, which is in the CI cache key — so the first Pages run after
+it is a cold one, ~12 m 10 s rather than ~3 m 19 s.
 
 ### Deploying to GitHub Pages
 

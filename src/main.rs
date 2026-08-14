@@ -1,6 +1,8 @@
 //! A hex grid to iterate terrain work in: a side-4 hexagon of locations under a daylight sky, with
 //! editor-style camera controls, click selection and coordinate labels.
 
+use clap::{builder::PossibleValuesParser, Parser};
+
 use bevy::{
     camera::Exposure,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
@@ -14,9 +16,10 @@ use bevy::{
 };
 
 use hex_terrain::camera::{self, place, Orbit};
-use hex_terrain::hex::{scenes, TerrainGrid};
+use hex_terrain::hex::scenes;
 use hex_terrain::probe::{ProbePlugin, WINDOW};
 use hex_terrain::sky::Sky;
+use hex_terrain::view::layout::DEFAULT_INSET;
 use hex_terrain::view::{GridModel, HexLayout, HexViewPlugin};
 
 /// Direction towards the sun, shared by the light and the sky so the highlight the water throws
@@ -30,9 +33,51 @@ const HEX_SCALE: f32 = 1.0;
 /// World units per unit of a location's height. The elevation knob, to `HEX_SCALE`'s in-plane one.
 const HEIGHT_SCALE: f32 = 1.5;
 
+/// What the shell can be told from the command line: which scene to load, and the one rendering
+/// knob worth tuning without a rebuild.
+///
+/// Parsed **before** `App::new()`, so a bad argument costs the message and not a GPU
+/// initialisation. On web there is no argv, so every field takes its default there and the panel is
+/// the only way to reach any of this — see `spec/scene.md`.
+// `long_about = None` keeps the doc comment above out of `--help`: it is written for a reader of
+// the source, not for someone at a prompt.
+#[derive(Parser, Debug)]
+#[command(about = "A hex grid to iterate terrain work in.", long_about = None)]
+struct Cli {
+    /// Which named scene to load.
+    #[arg(
+        long,
+        default_value = scenes::DEFAULT,
+        value_parser = PossibleValuesParser::new(scenes::names().collect::<Vec<_>>()),
+    )]
+    scene: String,
+
+    /// How far each cap is shrunk towards its centre, as a percentage of the hexagon's
+    /// circumradius. Also a slider in the panel.
+    #[arg(long, value_name = "PERCENT", value_parser = inset_percent)]
+    inset: Option<f32>,
+}
+
+/// A percentage on the command line, the fraction the meshes are built from in the layout.
+///
+/// The ceiling matches the panel slider's, so the two knobs reach the same places. Rejecting rather
+/// than clamping: a number outside the range is a mistake worth hearing about, not a value to
+/// silently substitute.
+fn inset_percent(arg: &str) -> Result<f32, String> {
+    let percent: f32 = arg.parse().map_err(|_| format!("not a number: {arg:?}"))?;
+    if !(0.0..=50.0).contains(&percent) {
+        return Err(format!("{percent} is outside 0..=50"));
+    }
+    Ok(percent / 100.0)
+}
+
 fn main() {
-    // Before the app, so an unknown scene name costs nothing but the message.
-    let grid = named_scene();
+    let cli = Cli::parse();
+    // `clap` has already rejected any name not in the table.
+    let grid = scenes::build(&cli.scene).expect("clap validated the scene name");
+    let layout = HexLayout::pointy(HEX_SCALE)
+        .with_height_scale(HEIGHT_SCALE)
+        .with_inset(cli.inset.unwrap_or(DEFAULT_INSET));
 
     let pinned = pinned_resolution();
 
@@ -49,8 +94,12 @@ fn main() {
         }))
         // `FreeCameraPlugin` is what flies the camera while the right button is held; the rest of
         // the controls are `camera::orbit`'s. See spec/camera-controls.md.
-        .add_plugins((HexViewPlugin, ProbePlugin, FreeCameraPlugin))
-        .insert_resource(HexLayout::pointy(HEX_SCALE).with_height_scale(HEIGHT_SCALE))
+        .add_plugins((
+            HexViewPlugin,
+            ProbePlugin::for_scene(cli.scene),
+            FreeCameraPlugin,
+        ))
+        .insert_resource(layout)
         .insert_resource(GridModel(grid))
         .init_resource::<camera::Pivot>()
         .add_systems(Startup, setup)
@@ -64,20 +113,6 @@ fn main() {
         )
         .add_systems(Update, (camera::orbit, exit_on_escape))
         .run();
-}
-
-/// The scene named as the first argument, or [`scenes::DEFAULT`].
-///
-/// Hand-rolled rather than parsed: one positional name is the whole interface, and `bevy` is the only
-/// dependency. On web there is no argv, so the default is all that is reachable there.
-fn named_scene() -> TerrainGrid {
-    let arg = std::env::args().nth(1);
-    let name = arg.as_deref().unwrap_or(scenes::DEFAULT);
-    scenes::build(name).unwrap_or_else(|| {
-        let names: Vec<&str> = scenes::names().collect();
-        eprintln!("unknown scene {name:?}; one of: {}", names.join(", "));
-        std::process::exit(2);
-    })
 }
 
 /// `HEX_TERRAIN_WINDOW=<W>x<H>`, or `None` for whatever the window manager decides.
@@ -215,7 +250,42 @@ fn exit_on_escape(keys: Res<ButtonInput<KeyCode>>, mut exit: MessageWriter<AppEx
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::CommandFactory;
     use hex_terrain::hex::{Axial, Cube, Doubled, Orientation};
+
+    /// `clap`'s own consistency check over the derived command — conflicting flags, a default that
+    /// its own value parser would reject, and so on.
+    #[test]
+    fn the_command_is_well_formed() {
+        Cli::command().debug_assert();
+    }
+
+    /// Every test here goes through `try_parse_from`. `Cli::parse` reads the real `argv`, which
+    /// under `cargo test` is the test-name filter, so calling it would fail the harness on
+    /// `cargo test some_filter`.
+    #[test]
+    fn no_arguments_is_the_default_scene_at_the_default_inset() {
+        let cli = Cli::try_parse_from(["hex-terrain"]).expect("no arguments is valid");
+        assert_eq!(cli.scene, scenes::DEFAULT);
+        assert_eq!(cli.inset, None);
+    }
+
+    #[test]
+    fn a_percentage_on_the_command_line_arrives_as_a_fraction() {
+        let cli = Cli::try_parse_from(["hex-terrain", "--scene", "two-lakes", "--inset", "12"])
+            .expect("a real scene and an in-range inset");
+        assert_eq!(cli.scene, "two-lakes");
+        assert_eq!(cli.inset, Some(0.12));
+    }
+
+    /// Both rejections happen before the window opens, which is the point of parsing first.
+    #[test]
+    fn a_bad_scene_or_a_bad_inset_is_refused() {
+        assert!(Cli::try_parse_from(["hex-terrain", "--scene", "nope"]).is_err());
+        assert!(Cli::try_parse_from(["hex-terrain", "--inset", "80"]).is_err());
+        assert!(Cli::try_parse_from(["hex-terrain", "--inset", "-1"]).is_err());
+        assert!(Cli::try_parse_from(["hex-terrain", "--inset", "wide"]).is_err());
+    }
 
     // Escape cannot be sent by hand in a headless check, so verify the wiring instead: the
     // right key code, the system registered, and an actual AppExit reaching the app.

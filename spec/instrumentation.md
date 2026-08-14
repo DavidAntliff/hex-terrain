@@ -2,7 +2,7 @@
 tags: [instrumentation, tooling, camera, screenshot, spec]
 type: spec
 status: implemented
-updated: 2026-08-13
+updated: 2026-08-14
 ---
 # Spec: Scripted observation
 
@@ -40,7 +40,9 @@ The two failures this exists to prevent, both previously real:
   than replacing it. Both resolve to the same `Orbit`.
 - **Existing invocations keep working.** `HEX_TERRAIN_SCREENSHOT=<path>` alone must still write
   exactly that path, with no index inserted.
-- **No CLI crate.** Parsing stays hand-rolled; see Design discussion.
+- **The `HEX_TERRAIN_*` parsing stays hand-rolled.** [[scene]] has since admitted `clap` for the
+  shell's own arguments, but nothing here is an argument: these are variables, and
+  `std::env::var` plus a `match` is the whole parser. See Design discussion.
 
 ### Functional requirements
 
@@ -105,9 +107,16 @@ self-documenting and cannot drift silently as fields are added. Locked.
 
 **`serde` is the one dependency exception**, agreed explicitly against [[scene]]'s "one dependency"
 constraint, which has been amended to say so. The distinction that makes it worth it: a typed schema
-for machine-read output is load-bearing in a way a camera controller or an argument parser was not —
-those were behaviour worth a few dozen lines, this is a contract. **No CLI crate**: one pose string
-and one scene name are the whole interface, and `clap` would earn nothing.
+for machine-read output is load-bearing in a way a camera controller was not — that was behaviour
+worth a few dozen lines, this is a contract.
+
+This page used to add "**No CLI crate**: one pose string and one scene name are the whole interface,
+and `clap` would earn nothing", which held while argv carried exactly one word. [[scene]] has since
+admitted `clap` for the shell's arguments, and the reasoning is there. It does not reach into this
+page: **a pose is still a variable, and `HEX_TERRAIN_CAMERA` still parses itself.** What did change
+is that `probe` no longer re-reads `std::env::args().nth(1)` to learn the scene name for the
+report — with two arguments that was simply wrong — so `ProbePlugin` is constructed with the name
+`main` already resolved.
 
 **The serialisation types live in their own module** (`src/probe/report.rs`), and nothing in
 `src/hex/` or `src/view/` derives `Serialize`. This is the same boundary `CLAUDE.md` draws for
@@ -167,8 +176,10 @@ than the scene. Two things had to be true for the pin to hold, and a third could
   - The realised gap between captures is `interval + 2` frames, the two being the state machine's
     own advance and capture steps. Sampling an animation does not care, so it is not corrected.
 - `indexed_path` inserts `-NN` before the extension, and only when there is more than one shot.
-- A bad *value* prints what was valid and exits 2, following `main::named_scene`. Absence is never
-  an error.
+- A bad *value* prints what was valid and exits 2, matching what `clap` does for a bad argument in
+  [[scene]]. Absence is never an error.
+- `ProbePlugin::for_scene(name)` carries the scene name in, for `Run.scene`. The probe has no other
+  way to learn it: `main` owns the arguments.
 
 `src/probe/report.rs` — the schema. `Report { run, window, camera, layout, model, render,
 diagnostics }`, `ReportSources` as a `SystemParam` gathering what it reads, and `Report::collect`.
@@ -183,6 +194,9 @@ Load-bearing details:
   empty"** — different bugs that look identical in a PNG. Triangles come from the index buffer where
   there is one, because an indexed mesh's vertex count says nothing about how many triangles it
   draws.
+- `layout.inset` is the fraction, not the `--inset` percentage — it is `HexLayout::inset` verbatim,
+  so the report says what the meshes were built from whether the value came from the argument or
+  the panel slider.
 - A cell's cap carries no marker of its own — it is the meshed child that is neither `HexWall` nor
   `WaterSurface` — so it is found through `Children` on `HexCell`.
 - `model.water_levels` is the **distinct levels, ascending**: a lower bound on the number of bodies,

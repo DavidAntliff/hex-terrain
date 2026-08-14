@@ -95,6 +95,10 @@ impl GridPlane {
     }
 }
 
+/// How far each cap is shrunk towards its centre, as a fraction of the circumradius, before
+/// anything says otherwise.
+pub const DEFAULT_INSET: f32 = 0.08;
+
 /// Projects hex coordinates into world space.
 #[derive(Debug, Clone, Copy, PartialEq, Resource)]
 pub struct HexLayout {
@@ -105,6 +109,15 @@ pub struct HexLayout {
     /// World units per unit of a location's dimensionless height — the second scaling knob, and
     /// the only place elevation acquires a size.
     pub height_scale: f32,
+    /// How far each cap is shrunk towards its centre, as a fraction of the circumradius. The
+    /// spacing is untouched, so this is what opens up the wall between neighbours and gives it its
+    /// incline.
+    ///
+    /// A fraction, not a world distance: the meshes are built at unit scale and stretched by a
+    /// `Transform`, which would scale an absolute inset along with everything else. That is also
+    /// why it survives [`Self::unit`] while `size` and `height_scale` do not.
+    // ponytail: one inset for the whole grid. Move it onto `Terrain` when a location needs its own.
+    pub inset: f32,
     pub origin: Vec3,
     pub plane: GridPlane,
 }
@@ -124,6 +137,7 @@ impl HexLayout {
             orientation: Orientation::Pointy,
             size: Vec2::splat(scale),
             height_scale: 1.0,
+            inset: DEFAULT_INSET,
             origin: Vec3::ZERO,
             plane: GridPlane::Xz,
         }
@@ -137,6 +151,11 @@ impl HexLayout {
 
     pub fn with_height_scale(mut self, height_scale: f32) -> Self {
         self.height_scale = height_scale;
+        self
+    }
+
+    pub fn with_inset(mut self, inset: f32) -> Self {
+        self.inset = inset;
         self
     }
 
@@ -296,6 +315,20 @@ mod tests {
 
     fn grid_coords() -> Vec<Axial> {
         Grid::hexagon(3, |_| ()).coords().collect()
+    }
+
+    /// The meshes are built in the unit frame, so an inset dropped by `unit()` would be an inset
+    /// that never reaches the geometry — while `size` and `height_scale` must be dropped, since a
+    /// `Transform` puts those back.
+    #[test]
+    fn the_inset_survives_the_unit_frame_and_the_scales_do_not() {
+        let unit = HexLayout::pointy(4.0)
+            .with_height_scale(3.0)
+            .with_inset(0.2)
+            .unit();
+        assert_eq!(unit.inset, 0.2);
+        assert_eq!(unit.size, Vec2::ONE);
+        assert_eq!(unit.height_scale, 1.0);
     }
 
     #[test]

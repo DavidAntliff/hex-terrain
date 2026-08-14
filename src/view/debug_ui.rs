@@ -1,10 +1,10 @@
 //! Top-right readout for the selected hex, and the controls that drive the view.
 //!
-//! Five controls: a button cycling the label mode (including off), a button toggling the hexagon
-//! orientation, checkboxes for the compass and for hiding the terrain's skirt, a slider for the sea
-//! level, and a button that frames the whole scene from overhead. The state-carrying buttons cycle
-//! rather than offering radio lists, because this is a debug panel and a cycle is one entity and one
-//! observer arm.
+//! Six controls: a button cycling the label mode (including off), a button toggling the hexagon
+//! orientation, checkboxes for the compass and for hiding the terrain's skirt, sliders for the sea
+//! level and the cap inset, and a button that frames the whole scene from overhead. The
+//! state-carrying buttons cycle rather than offering radio lists, because this is a debug panel and
+//! a cycle is one entity and one observer arm.
 
 use bevy::prelude::*;
 use bevy::ui::Checked;
@@ -31,6 +31,12 @@ const DIM: Color = Color::srgb(0.60, 0.65, 0.74);
 /// ends of the track drain the grid completely and drown it completely.
 const SEA_LEVEL_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
 
+/// The inset slider's travel, **in percent** — the units the caption reads in, so the widget's own
+/// value needs no scaling. [`HexLayout::inset`] is the fraction, so the two are converted at this
+/// edge and nowhere else. Half the circumradius is where a cap has shrunk to a quarter of its area
+/// and the walls are all there is left to see; past that there is nothing to look at.
+const INSET_RANGE: std::ops::RangeInclusive<f32> = 0.0..=50.0;
+
 /// The thumb's width as a percentage of the track, kept out of the travel so it cannot overhang
 /// either end.
 const THUMB_WIDTH: f32 = 9.0;
@@ -53,6 +59,7 @@ pub enum Control {
     Compass,
     HideSkirt,
     SeaLevel,
+    Inset,
     ResetView,
 }
 
@@ -103,7 +110,21 @@ pub fn spawn_debug_ui(
             );
             spawn_checkbox(panel, Control::Compass, show_compass.0, COMPASS_CAPTION);
             spawn_checkbox(panel, Control::HideSkirt, hide_skirt.0, SKIRT_CAPTION);
-            spawn_slider(panel, Control::SeaLevel, sea.0);
+            spawn_slider(
+                panel,
+                Control::SeaLevel,
+                sea.0,
+                SEA_LEVEL_RANGE,
+                sea_level_caption(sea.0),
+            );
+            let inset_percent = layout.inset * 100.0;
+            spawn_slider(
+                panel,
+                Control::Inset,
+                inset_percent,
+                INSET_RANGE,
+                inset_caption(inset_percent),
+            );
             spawn_button(panel, Control::ResetView, RESET_CAPTION.to_string());
         });
 }
@@ -111,7 +132,13 @@ pub fn spawn_debug_ui(
 /// A captioned slider: the caption above, the track below, and a thumb inside the track that
 /// [`position_slider_thumbs`] moves. The widget is headless — it reads the drag and reports a
 /// value; every pixel of it is ours.
-fn spawn_slider(panel: &mut ChildSpawnerCommands, control: Control, value: f32) {
+fn spawn_slider(
+    panel: &mut ChildSpawnerCommands,
+    control: Control,
+    value: f32,
+    range: std::ops::RangeInclusive<f32>,
+    caption: String,
+) {
     panel
         .spawn(Node {
             flex_direction: FlexDirection::Column,
@@ -121,7 +148,7 @@ fn spawn_slider(panel: &mut ChildSpawnerCommands, control: Control, value: f32) 
         .with_children(|group| {
             group.spawn((
                 ControlCaption(control),
-                Text::new(sea_level_caption(value)),
+                Text::new(caption),
                 TextFont::from_font_size(12.0),
                 TextColor(TEXT),
             ));
@@ -130,7 +157,7 @@ fn spawn_slider(panel: &mut ChildSpawnerCommands, control: Control, value: f32) 
                     control,
                     Slider::default(),
                     SliderValue(value),
-                    SliderRange::from_range(SEA_LEVEL_RANGE),
+                    SliderRange::from_range(range),
                     Node {
                         width: Val::Percent(100.0),
                         height: Val::Px(14.0),
@@ -224,6 +251,11 @@ fn sea_level_caption(level: f32) -> String {
     format!("sea level: {level:+.2}")
 }
 
+/// Takes a percentage, not the fraction [`HexLayout::inset`] holds — the slider's own value.
+fn inset_caption(percent: f32) -> String {
+    format!("inset: {percent:.0}%")
+}
+
 /// Puts each thumb where its value says. The widget deliberately leaves this to the caller, since
 /// it cannot know how the thumb is drawn; the travel is reduced by the thumb's own width so it
 /// stops flush with either end of the track rather than hanging over it.
@@ -275,15 +307,26 @@ pub fn on_checkbox_changed(
 
 /// Sliders: adopt the reported value. Separate from the checkbox observer because the payload type
 /// is what selects the event.
+///
+/// Each arm compares before it writes. A drag reports a value every frame it is held, most of them
+/// the same one, and a write here marks the resource changed — which for the inset rebuilds every
+/// cap, wall and skirt in the grid.
 pub fn on_slider_changed(
     change: On<ValueChange<f32>>,
     controls: Query<&Control>,
     mut sea: ResMut<SeaLevel>,
+    mut layout: ResMut<HexLayout>,
 ) {
-    if let Ok(Control::SeaLevel) = controls.get(change.source)
-        && sea.0 != change.value
-    {
-        sea.0 = change.value;
+    match controls.get(change.source) {
+        Ok(Control::SeaLevel) if sea.0 != change.value => sea.0 = change.value,
+        // The slider reads in percent; the layout holds the fraction the meshes are built from.
+        Ok(Control::Inset) => {
+            let inset = change.value / 100.0;
+            if layout.inset != inset {
+                layout.inset = inset;
+            }
+        }
+        _ => {}
     }
 }
 
@@ -310,6 +353,7 @@ pub fn update_captions(
             Control::Compass => checkbox_caption(show_compass.0, COMPASS_CAPTION),
             Control::HideSkirt => checkbox_caption(hide_skirt.0, SKIRT_CAPTION),
             Control::SeaLevel => sea_level_caption(sea.0),
+            Control::Inset => inset_caption(layout.inset * 100.0),
             Control::ResetView => RESET_CAPTION.to_string(),
         };
     }

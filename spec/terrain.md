@@ -2,7 +2,7 @@
 tags: [terrain, elevation, spec]
 type: spec
 status: stale
-updated: 2026-08-13
+updated: 2026-08-14
 ---
 # Spec: Terrain height
 
@@ -70,6 +70,17 @@ sign of a height becomes nothing but a vertex position. Locked.
 **A cap is inset and its wall is the ring around it.** Shrinking the cap while leaving the spacing
 alone is what opens up a visible wall between neighbours, and gives it an incline even where two
 heights match. Locked.
+
+**How far it is inset is a runtime knob, on the layout.** It began as a `const INSET` in
+`grid_render`, which meant tuning it by eye cost an edit and a link. It is now
+`HexLayout::inset`, reachable from `--inset <percent>` (see [[scene]]) and from a panel slider (see
+[[hex-grid]]). The layout is where it belongs even though a fraction of the circumradius is
+dimensionless: every mesh builder here is already handed a `&HexLayout`, `sync_cells` and
+`sync_skirts` already rebuild on `layout.is_changed()`, and the boundary this project defends is
+the **model** — which the inset never touches. It is a fraction rather than a world distance
+because the meshes are built at unit scale and stretched by a `Transform`, which would scale an
+absolute inset along with everything else; that is also why it must survive `HexLayout::unit()`,
+and a test pins that.
 
 **The wall has two kinds of piece, because the gaps have two shapes.** An inset hexagon leaves a
 strip along each edge and a triangle at each corner. So the wall is six **bridges**, each half of
@@ -169,8 +180,8 @@ the same picture rather than a quietly different one.
 
 ```
 src/hex/mod.rs           Terrain { height }, and `undulating` — the placeholder generator
-src/view/layout.rs       height_scale · elevation · surface_centre · mesh_scale · corner_directions
-src/view/grid_render.rs  INSET, the cap and wall meshes, the fence rule, per-cell entities, outlines
+src/view/layout.rs       inset · height_scale · elevation · surface_centre · mesh_scale · corner_directions
+src/view/grid_render.rs  the cap and wall meshes, the fence rule, per-cell entities, outlines
 src/view/selection.rs    pick_surface — ray against every cap plane, nearest first
 src/view/labels.rs       labels anchored on the caps
 src/main.rs              HEIGHT_SCALE, the grid's generator, shadows and ambient fill
@@ -308,7 +319,8 @@ Deliberate omissions:
 
 - The heights are a placeholder sinusoid. Real generation is the next thing this spec grows.
 - **The surface itself has no underside** — what closes it hangs below and belongs to [[skirt]].
-- One inset for the whole grid, not per location; and no per-height colouring or height in the debug
+- One inset for the whole grid, not per location — adjustable now, but still a single value; and no
+  per-height colouring or height in the debug
   readout — the readout's world position is still the hex centre on the plane, not the cap.
 - **How a water plate is *shaded* is no longer specified here** — see [[water]], which covers the
   ripple field, the shoaling colour, and the per-vertex depth the renderer computes for it. What

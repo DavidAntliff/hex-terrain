@@ -84,6 +84,9 @@ pub struct Layout {
     pub orientation: &'static str,
     pub hex_scale: [f32; 2],
     pub height_scale: f32,
+    /// The cap inset as a fraction of the circumradius — the `--inset` percentage divided by 100,
+    /// or wherever the panel's slider was left.
+    pub inset: f32,
     pub labels: &'static str,
     pub compass: bool,
     pub selected: Option<[i32; 2]>,
@@ -230,6 +233,7 @@ fn layout(sources: &ReportSources) -> Layout {
         orientation: layout.orientation.name(),
         hex_scale: layout.size.to_array(),
         height_scale: layout.height_scale,
+        inset: layout.inset,
         labels: sources.labels.name(),
         compass: sources.compass.0,
         selected: sources.selected.0.map(|c| [c.q, c.r]),

@@ -2,7 +2,7 @@
 tags: [hex, grid, coordinates, spec]
 type: spec
 status: implemented
-updated: 2026-08-12
+updated: 2026-08-14
 ---
 # Spec: Hexagonal grid
 
@@ -105,7 +105,15 @@ constants that had already been adjusted three times by observation.
 but a cycle is one entity and one observer arm, and this is a debug panel. "No labels" is a fourth
 `LabelMode` rather than a separate flag, so a single piece of state governs the labels and there is
 nothing to disagree with. [[terrain]] added a fifth control, a slider, for a value that is
-continuous rather than a choice between named states.
+continuous rather than a choice between named states, and then a sixth of the same kind for the cap
+inset. `spawn_slider` therefore takes its range and its caption as arguments — the caption because
+each slider reads in its own units, and the range because the sea level travels `-1..=1` in height
+units while the inset travels `0..=50` in percent.
+
+**The inset slider reads in percent while `HexLayout::inset` holds a fraction.** The conversion is
+at the panel's edge and at [[scene]]'s argument parser, and nowhere in between: a caption saying
+`inset: 8%` is worth two divisions by 100 against threading a percentage through the mesh builders,
+which want the fraction.
 
 ## Coordinate conventions
 
@@ -222,7 +230,9 @@ flat-top matrix by hand. Labels-off and compass-off were confirmed, as was the t
 in both a wide and a tall window.
 
 **Not verified:** actual mouse interaction — the click-to-select ray and pressing the panel's
-controls. No pointer or key injection tool is available on this machine, so every state was
+controls, the inset slider among them — it has been preset from `--inset` and seen to redraw the
+grid, but never dragged.
+No pointer or key injection tool is available on this machine, so every state was
 reached by presetting resources rather than by clicking, and the raycast itself is covered only by the
 round-trip tests over the same projection code it uses. Someone should click around and confirm the
 feel, particularly that clicking a control does **not** also change the selection — that guard has

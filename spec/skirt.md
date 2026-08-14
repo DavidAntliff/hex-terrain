@@ -2,7 +2,7 @@
 tags: [terrain, rendering, spec]
 type: spec
 status: implemented
-updated: 2026-08-13
+updated: 2026-08-14
 ---
 # Spec: Terrain skirt
 
@@ -189,8 +189,8 @@ both derive from it.
 Deliberate omissions:
 
 - The buried interior sides are not culled (above).
-- One `SKIRT_BASE` and one `SKIRT_STEP` for the whole grid, as `INSET` is — nothing yet wants a
-  location to carry its own.
+- One `SKIRT_BASE` and one `SKIRT_STEP` for the whole grid, as `HexLayout::inset` is — nothing
+  yet wants a location to carry its own. Unlike the inset, these two are not adjustable at runtime.
 - The cut face is flat-shaded and matte, with none of the surface's ripple or specular. It is a cut
   through water, not a face of it.
 - Hiding is all-or-nothing. Per-location hiding is a `Visibility` away but nothing asks for it.

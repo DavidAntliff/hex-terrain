@@ -532,3 +532,37 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   Chrome — the scene renders, `water.wgsl` returns 200, and only the expected WebGL2 downlevel
   warnings appear. `trunk serve` was **not** re-run; the change alters where trunk writes the asset,
   not how, and the release build exercises the same pipeline.
+
+## [2026-08-14] feature | the inset becomes a knob, and argv gets a parser
+
+- **`--scene` and `--inset`, parsed by `clap`.** The shell had one positional argument and a
+  hand-rolled parser, which [[scene]] had locked as "not a CLI crate". A second knob broke every
+  premise that decision rested on — ordering, absence and range all become real cases, and the
+  valid scene names have to be printed in two places — so the constraint was amended by agreement,
+  as `serde` was before it. `--scene` carries a `PossibleValuesParser` built from `scenes::names()`,
+  so `--help` and the bad-name error are both generated and `scenes::build` can no longer fail.
+- **The rule that bites: a test must never call `Cli::parse`.** Under `cargo test` the first
+  argument is the test-name filter, so `cargo test some_filter` would exit the harness. Every test
+  goes through `try_parse_from`. This is the same trap `named_scene` carried, restated for `clap`.
+- **`const INSET` became `HexLayout::inset`.** Tuning it by eye used to cost an edit and a link. On
+  the layout it costs nothing to wire: every mesh builder is already handed a `&HexLayout`, and
+  `sync_cells` and `sync_skirts` already rebuild on `layout.is_changed()`, so the shared cap, every
+  wall and every skirt follow a change with no new systems. The alternative — a `SeaLevel`-style
+  resource — meant threading an `f32` through five functions and their tests. The inset survives
+  `HexLayout::unit()` where `size` and `height_scale` do not, because it is a fraction of the
+  circumradius and the meshes are built in that unit frame; a test pins it.
+- **`probe` was re-reading `std::env::args().nth(1)`** to learn the scene name for the report. With
+  two arguments that is simply wrong — it would have reported `--scene`. `ProbePlugin::for_scene`
+  now takes the name `main` already resolved, and `report::Layout` gained `inset`.
+- **Percent at the edges, fraction in the middle.** `--inset 25` and the panel slider both read in
+  percent; `HexLayout::inset` holds `0.25`. Two divisions by 100, at the parser and at the
+  observer, rather than a percentage threaded through the mesh builders.
+- `clap` costs **+246,651 bytes of release wasm (0.47%)** — the one controlled before/after in
+  [[build-performance]]. Left unconditional rather than scoped to non-wasm: 0.5% is not worth a
+  second code path.
+- Verified: 92 tests (up from 86), `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`, `trunk build --release`. `--help`, `--scene nope`, `--inset 80` and
+  `--inset wide` all exit 2 without opening a window; `cargo test the_inset` does not exit the
+  harness. Screenshots at 8% and 25% show caps, walls, skirts and outlines moving together, and the
+  report reads `layout.inset` 0.08 and 0.25 with `run.scene` correct. **Not verified:** dragging
+  the inset slider — it has only been preset, as no pointer-injection tool exists here.
