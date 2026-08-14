@@ -35,10 +35,15 @@ Turning is on the middle button rather than Unity's `Alt`+left because i3 — an
 managers — grab `Alt`+drag for themselves before the app ever sees it.
 
 The panel top right reports the selected hexagon in axial, cube and doubled coordinates plus world
-position, and carries nine controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
-pointy-top against flat-top, show or hide the axis compass, hide the skirt to see the terrain as a
-bare shell, move the sea level, shrink or widen the cap inset, raise or lower the shoreline and the
-snow line, and reset the view to look straight down with everything in frame.
+position, and carries sixteen controls. Cycle the per-hex labels (axial / cube / doubled / off) and
+toggle pointy-top against flat-top; show the axis compass or the per-hex outlines, or hide the skirt
+to see the terrain as a bare shell; move the sea level or the cap inset; and reset the view to look
+straight down with everything in frame.
+
+Eight of them drive the surface shading, and are worth a drag each — the shoreline and the snow
+line, which move the biome bands; the tint strength and scale, which break up a biome's flat colour;
+the slope at which bare rock takes over; and the two that shape the boundary where one biome gives
+way to another, plus the bump that stops a cap reading as a flat plate. See `spec/biomes.md`.
 
 See `spec/camera-controls.md` for why the bindings are these ones.
 
@@ -91,7 +96,7 @@ See `spec/instrumentation.md` for the details.
     cargo run -- --help
 
 Scenes are named grids in `src/hex/scenes.rs`; an unknown name lists the valid ones. `--inset` is a
-percentage of the hexagon's circumradius, `0`–`50`, defaulting to 8 — the same knob as the panel's
+percentage of the hexagon's circumradius, `0`–`50`, defaulting to 25 — the same knob as the panel's
 inset slider. The web build has no arguments and always shows the defaults, so the slider is the
 only way to reach the inset there.
 
@@ -99,7 +104,6 @@ only way to reach the inset there.
 - `two-lakes` — two bodies at different levels divided by a land bridge one hex wide.
 - `terraces` — three bodies at three levels over two bridges, one tall enough that only the upper body
   reaches it and one low enough that both do.
-
 - `biomes` — a ramp across every biome band, with one outlier peak that stands snow directly against
   the low ground. For looking at how the surface is coloured and how one biome gives way to another.
 
