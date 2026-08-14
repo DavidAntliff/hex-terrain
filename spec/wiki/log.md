@@ -771,3 +771,38 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   wasm32-unknown-unknown`. Frame rate is vsync-capped at 60 both with and without the bump, so that
   only shows the three extra noise evaluations do not breach 60 at this scene size — it is not a
   measurement of their cost.
+
+## [2026-08-14] fix | the shader that was never fetched
+
+`biomes` rendered correctly natively and, in a browser under `trunk serve`, drew no caps and no
+walls at all. The hexes read as open shells. Everything else — skirts, water, UI, gizmos — was fine.
+The shader was the obvious suspect and was the wrong one.
+
+- **The shader was never loaded.** Bevy probes `<asset>.meta` before every asset. `trunk serve`
+  answers a missing path with `index.html` and a `200`; Bevy takes that as meta, fails to
+  deserialize it, and **abandons the asset**, so `terrain.wgsl` is never requested at all. One
+  `ERROR Failed to deserialize meta ... ExpectedNamedStructLike("AssetMetaMinimal")` line is the
+  entire signal — no pipeline error, no shader error, no warning.
+- **That line was already in the notes as "normal and harmless"**, recorded from the GitHub Pages
+  deploy where it genuinely is: Pages answers a real 404 and Bevy ignores the probe. The claim was
+  true of one host and false of the other, and carrying it forward cost a whole session of shader
+  bisecting. [[build-performance]] now says which hosts it holds for.
+- **The bisect could not have worked, and its own evidence said so.** Replacing the fragment body
+  with solid red changed nothing — which was read as "the fragment shader is skipped" when it meant
+  "this file is not being read". A test whose negative result is the same for every input is not
+  measuring the thing.
+- **The check that ends it in a minute**, in the page console:
+  `performance.getEntriesByType('resource').filter(e => /wgsl/.test(e.name)).map(e => e.name)`.
+  Only `.meta` entries and no entry for the shader itself is the whole diagnosis. Reach for it
+  before touching shader source whenever a material silently fails to draw on the web.
+- **`WGPU_SETTINGS_PRIO=webgl2` reproduces WebGL2 *limits* natively** and was worth the two minutes
+  it took: it renders `biomes` correctly, which ruled out the limits and pointed away from the
+  shader early. It needs a small window — the default 1280x720 at scale factor 2 asks for a
+  2560-wide surface and WebGL2 caps textures at 2048. It cannot reproduce the GLSL translation
+  itself; `WGPU_BACKEND=gl` is not available in this build (no GPU found on either driver).
+- **Fix:** `AssetPlugin { meta_check: AssetMetaCheck::Never, .. }` in `main.rs`. No asset here has a
+  `.meta` file, so the probe could only ever cost two round trips and, on the wrong host, the render.
+- Native is unchanged, as it must be: same frame at `WGPU_SETTINGS_PRIO=webgl2` before and after
+  differs by a maximum of 1.7 levels of 255 and a mean of 0.006, which is the sky's dither.
+- Verified: 100 tests, `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`, and the browser check [[biomes]] was waiting on.

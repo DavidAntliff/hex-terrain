@@ -1,7 +1,7 @@
 ---
 tags: [biomes, terrain, shader, texturing, spec]
 type: spec
-status: incomplete
+status: implemented
 updated: 2026-08-14
 ---
 # Spec: Biomes and procedural surface colour
@@ -240,8 +240,8 @@ browser on WebGL2** — the check that counts, per the constraint above.
 
 ## Implementation status
 
-**status:** incomplete — steps 1 and 2 are built and agree with this spec; steps 3 to 5 are not
-started. No divergence known.
+**status:** implemented — all five steps are built and agree with this spec, and the browser check
+below has now been made. No divergence known.
 
 - **Step 1, per-biome colour: done.** `Biome`, `Bands` and `Biome::at` in `src/hex/biome.rs`; the
   `biomes` scene; per-biome cap and wall materials; `HexCap`; `BiomeBands` and `sync_biomes`; the
@@ -281,9 +281,16 @@ started. No divergence known.
   at zero: half the visible terrain changes, and the local luminance variation within a face rises
   from 19.4 to 20.7. The sample step matters and the intuition was backwards: **0.02 beat 0.06 and
   0.14**, because it is the finest octaves that read as a surface, not the broad tilt.
-- **Not verified anywhere yet**: the shader in a browser on WebGL2, which per the constraints above
-  is the only check that proves the WGSL translates. Deferred to the end of the procedural work
-  rather than repeated per step.
+- **Verified in a browser on WebGL2 on 2026-08-14** — Chrome on ANGLE over Intel UHD (TGL GT1),
+  `WebGL 2.0 (OpenGL ES 3.0 Chromium)`. Caps, walls, the three-way blend, the rock and the bump all
+  render, and the frame matches the native one. The WGSL translates; nothing in it needed changing.
+- **What that check first appeared to fail was not the shader at all.** Caps and walls drew nothing
+  under `trunk serve`, and the shader looked guilty. It never ran: the dev server answers the
+  `.meta` probe with its index page and a `200`, Bevy fails to deserialize that and abandons the
+  asset, and the shader is then never fetched. `AssetPlugin { meta_check: AssetMetaCheck::Never }`
+  in `main.rs` is the fix; the diagnosis and the one-line console check that finds it in a minute
+  are in [[build-performance]]. Nothing here is WebGL2-specific — any host that 200s a missing path
+  does the same, and a native run cannot reproduce it because the absent file reports missing.
 
 ## Related
 
