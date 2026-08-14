@@ -655,3 +655,35 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   to the end of the procedural work. Three Bevy systems now carry
   `#[allow(clippy::too_many_arguments)]`; each argument is a resource genuinely read, and a
   `SystemParam` would hide the dependency list without shortening it.
+
+## [2026-08-14] feature | rock by slope, and an ambient occlusion that could not work here
+
+- **A steep face is bare rock, whatever biome it stands in.** `1 - dot(normal, up)` against a
+  threshold in the shader, with the up axis passed in as a uniform from `HexLayout::plane` rather
+  than assumed to be `+Y`. Caps need no exemption: they are level, so their slope is zero and the
+  mix never fires. Measured on `biomes`: 6.2% of the visible terrain, median 8 levels of 255,
+  99th percentile 94.
+- **Ambient occlusion was built, measured and removed. The measurement is the point.** A per-vertex
+  crease term rode in `uv.y` and attenuated `PbrInput::diffuse_occlusion`, which is the correct
+  channel — it dims the indirect light a shut-in surface loses and leaves direct sun alone. It was
+  invisible, and not because of a bug: **this scene is lit mostly by its directional sun.** Occluding
+  *all* indirect light on every surface — a hardcoded 80%, geometry ignored — moves the median
+  terrain pixel by **zero** levels of 255, with a maximum of 42. So the ceiling on any physically
+  honest AO here is a handful of levels, and the geometric term produced three. Deleted rather than
+  faked by darkening albedo, which would dim a crease in full sunlight too. Worth revisiting only if
+  the lighting stops being sun-dominated.
+- **`max` over an image diff is a trap, and it cost several rounds.** A single antialiased edge pixel
+  put the peak difference at 173 of 255 between two frames that were, in the body of the terrain,
+  identical — which read as "the effect is strong" when the median was 0. Percentiles over a mask of
+  terrain pixels are the statistic; the peak is noise. The same mistake in the other direction is
+  what made the [[biomes]] tint look like it worked in the first place.
+- **Screenshots from `probe` are deterministic**, because the settle and repose frame counts are
+  fixed and `globals.time` follows the frame count. Two runs of unchanged code are byte-identical
+  even with the water animating, so a zero diff really does mean nothing changed — which is what
+  proved the occlusion uniform was inert rather than merely subtle.
+- **To find out whether a per-vertex channel reaches the fragment shader, render it as albedo.**
+  `base_color = vec3(in.uv.y)` settled in one frame that `uv.y` was arriving correctly and moved the
+  search to the lighting, after two rounds of guessing at the uniform layout.
+- Verified: 99 tests, `cargo clippy --all-targets` clean. `WALL_SHADE` stays at 0.78 and is now
+  documented as a deliberate thumb on the scale, since the measurement above shows the lighting
+  cannot supply that difference on its own.

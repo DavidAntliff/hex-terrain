@@ -155,7 +155,8 @@ VERTEX_COLORS` — a shader def the mesh pipeline sets from the vertex layout �
 `terrain.wgsl` serves both and there is no second material type.
 
 **Attribute budget, fixed up front so the steps do not rework each other.** The wall mesh's
-`ATTRIBUTE_COLOR` is `vec4(w0, w1, w2, ao)`: three blend weights and an ambient-occlusion scalar.
+`ATTRIBUTE_COLOR` carries three blend weights. The fourth component was reserved for an
+ambient-occlusion scalar, which was built and then removed — see below.
 Biome identities pack into `uv.x` as `a + 8*b + 64*c`, where the walls currently write an unused
 placeholder. Identities are constant across a triangle, so interpolating them returns them exactly.
 
@@ -241,8 +242,21 @@ started. No divergence known.
   wrong and has been corrected in place** rather than left to mislead: the noise's coarsest octave
   has to be about one hexagon, not several, or it is invisible. The correction is recorded there
   with what it was measured against.
-- **Steps 3 to 5**: slope-driven rock and crevice AO, the blend across the wall, and normal
-  perturbation. Not started.
+- **Step 3, slope-driven rock: done.** A face steeper than the panel's threshold reads as bare
+  rock whatever biome it belongs to, mixed in the shader from `1 - dot(normal, up)` with the up axis
+  passed in from `HexLayout::plane`. Measured on `biomes`, it moves 6.2% of the visible terrain, by a
+  median of 8 levels of 255 and a 99th percentile of 94 — a strong, localised effect.
+- **Crevice ambient occlusion: built, measured, removed.** A per-vertex occlusion term rode in
+  `uv.y` and attenuated `diffuse_occlusion`, which is the physically correct channel — it dims the
+  indirect light a shut-in surface loses while leaving direct sun alone. It is invisible here, and
+  the reason is a property of the scene rather than of the code: **this scene is lit mostly by its
+  directional sun**, so the indirect term is small. Occluding *all* of a surface's indirect light —
+  a constant 80%, ignoring the geometry entirely — moves the median terrain pixel by **zero** levels
+  of 255 and the most extreme by 42. The geometric term the creases actually produce is about a
+  third of that on a fifth of the wall vertices, which came to three levels. Cut rather than
+  reproduced by darkening albedo instead: that would dim a crease in full sunlight too, which is
+  what makes vertex AO look painted on. Revisit only if the lighting stops being sun-dominated.
+- **Steps 4 and 5**: the blend across the wall, and normal perturbation. Not started.
 - **Not verified anywhere yet**: the shader in a browser on WebGL2, which per the constraints above
   is the only check that proves the WGSL translates. Deferred to the end of the procedural work
   rather than repeated per step.

@@ -1,9 +1,9 @@
 //! Top-right readout for the selected hex, and the controls that drive the view.
 //!
-//! Eleven controls: a button cycling the label mode (including off), a button toggling the hexagon
+//! Twelve controls: a button cycling the label mode (including off), a button toggling the hexagon
 //! orientation, checkboxes for the compass and for hiding the terrain's skirt, sliders for the sea
-//! level, the cap inset, the shoreline, the snow line and the two tint knobs, and a button that
-//! frames the whole scene from overhead. The state-carrying buttons cycle rather than offering radio
+//! level, the cap inset, the shoreline, the snow line, the two tint knobs and the slope rock takes
+//! over at, and a button that frames the whole scene from overhead. The state-carrying buttons cycle rather than offering radio
 //! lists, because this is a debug panel and a cycle is one entity and one observer arm.
 
 use bevy::prelude::*;
@@ -52,6 +52,10 @@ const BAND_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
 const TINT_AMPLITUDE_RANGE: std::ops::RangeInclusive<f32> = 0.0..=0.5;
 const TINT_WAVELENGTH_RANGE: std::ops::RangeInclusive<f32> = 0.5..=20.0;
 
+/// Where rock takes over from the biome, in units of `1 - dot(normal, up)`. The top of the track is
+/// vertical, so past about half of it only the sheerest faces are ever bare.
+const ROCK_ONSET_RANGE: std::ops::RangeInclusive<f32> = 0.0..=1.0;
+
 /// The thumb's width as a percentage of the track, kept out of the travel so it cannot overhang
 /// either end.
 const THUMB_WIDTH: f32 = 9.0;
@@ -79,6 +83,7 @@ pub enum Control {
     SnowLine,
     TintAmplitude,
     TintWavelength,
+    RockOnset,
     ResetView,
 }
 
@@ -177,6 +182,13 @@ pub fn spawn_debug_ui(
                 look.0.tint_wavelength,
                 TINT_WAVELENGTH_RANGE,
                 tint_wavelength_caption(look.0.tint_wavelength),
+            );
+            spawn_slider(
+                panel,
+                Control::RockOnset,
+                look.0.rock_onset,
+                ROCK_ONSET_RANGE,
+                rock_onset_caption(look.0.rock_onset),
             );
             spawn_button(panel, Control::ResetView, RESET_CAPTION.to_string());
         });
@@ -325,6 +337,13 @@ fn tint_wavelength_caption(wavelength: f32) -> String {
     format!("tint scale: {wavelength:.1}")
 }
 
+/// Reads out the angle rather than the `1 - dot(normal, up)` the shader takes. The slider's units
+/// are the shader's because that costs nothing; a slope in degrees is what a person can picture.
+fn rock_onset_caption(onset: f32) -> String {
+    let degrees = (1.0 - onset).clamp(-1.0, 1.0).acos().to_degrees();
+    format!("rock above: {degrees:.0}\u{b0}")
+}
+
 /// Puts each thumb where its value says. The widget deliberately leaves this to the caller, since
 /// it cannot know how the thumb is drawn; the travel is reduced by the thumb's own width so it
 /// stops flush with either end of the track rather than hanging over it.
@@ -405,6 +424,9 @@ pub fn on_slider_changed(
         Ok(Control::TintWavelength) if look.0.tint_wavelength != change.value => {
             look.0.tint_wavelength = change.value
         }
+        Ok(Control::RockOnset) if look.0.rock_onset != change.value => {
+            look.0.rock_onset = change.value
+        }
         _ => {}
     }
 }
@@ -445,6 +467,7 @@ pub fn update_captions(
             Control::SnowLine => snow_line_caption(bands.0.snow),
             Control::TintAmplitude => tint_amplitude_caption(look.0.tint_amplitude),
             Control::TintWavelength => tint_wavelength_caption(look.0.tint_wavelength),
+            Control::RockOnset => rock_onset_caption(look.0.rock_onset),
             Control::ResetView => RESET_CAPTION.to_string(),
         };
     }

@@ -1,8 +1,9 @@
-// Terrain: a biome's flat colour, broken up by noise evaluated in world space.
+// Terrain: a biome's flat colour, weathered into something that reads as ground.
 //
 // An extension to the standard material rather than a material of its own, so the lighting, the
-// shadows and the environment reflection all come from stock PBR. This shader supplies only what
-// the material cannot know: that two caps of the same biome should not be the same colour.
+// shadows and the environment reflection all come from stock PBR. Three things the material cannot
+// know are supplied here: that two caps of the same biome should not be the same colour, and that a
+// steep enough face is bare rock whatever grows on the flat ground above it.
 //
 // The noise is a function of the **world position**, not of position within a cell, which is the
 // whole point — anything keyed to the cell would repeat with the lattice and read as tiles no
@@ -17,12 +18,22 @@
 }
 
 struct TerrainSettings {
+    // The colour of exposed rock, **linear** — it is mixed against a base colour the material has
+    // already converted out of sRGB, so it has to arrive in the same space.
+    rock: vec3<f32>,
     // How far the tint may swing either side of the material's own colour, as a fraction of it.
     tint_amplitude: f32,
+    // The grid's up axis in world space, from `HexLayout::plane`. Passed in rather than assumed,
+    // because which axis is up is the view's to know and it is not always +Y.
+    up: vec3<f32>,
     // Size of the largest noise feature, in world units. Wants to be around one hexagon or less:
     // features larger than a cap only shift whole caps against each other, and what reads as
     // texture is the detail *within* one. Drag it long for regional variation instead.
     tint_wavelength: f32,
+    // Where rock starts taking over from the biome, and over how much slope it finishes. Both in
+    // units of `1 - dot(N, up)`: level is 0, a 45 degree face is 0.29, and vertical is 1.
+    rock_onset: f32,
+    rock_width: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainSettings;
@@ -123,14 +134,23 @@ const SWING_PER_AMPLITUDE: f32 = 0.30;
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
 
-    // Multiplicative, and in linear space, so the biome's hue survives and only its brightness
-    // moves. Mixing towards a second colour instead would make every biome drift towards the same
-    // one wherever the noise is high.
+    // Rock first, because it decides *which material* this fragment is; the tint then varies
+    // whichever one that turned out to be. A steep face is bare rock whatever grows on the flat
+    // ground above it, which is why this is a slope test and not a biome — the `Rock` biome is a
+    // band of elevation and happens to look similar, but the two are answering different questions.
+    // Caps need no exemption: they are level, so their slope is zero and the mix never fires.
+    let slope = 1.0 - dot(pbr_input.N, terrain.up);
+    let bare = smoothstep(terrain.rock_onset, terrain.rock_onset + terrain.rock_width, slope);
+    let base = pbr_input.material.base_color;
+    let material = mix(base.rgb, terrain.rock, bare);
+
+    // Multiplicative, and in linear space, so the material's hue survives and only its brightness
+    // moves. Mixing towards a second colour instead would make everything drift towards that one
+    // colour wherever the noise is high.
     let n = fbm(in.world_position.xyz / terrain.tint_wavelength);
     let swing = clamp((n - 0.5) * 2.0 / SWING_PER_AMPLITUDE, -1.0, 1.0);
     let tint = 1.0 + swing * terrain.tint_amplitude;
-    let base = pbr_input.material.base_color;
-    pbr_input.material.base_color = vec4(base.rgb * tint, base.a);
+    pbr_input.material.base_color = vec4(material * tint, base.a);
 
     pbr_input.material.base_color =
         alpha_discard(pbr_input.material, pbr_input.material.base_color);

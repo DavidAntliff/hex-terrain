@@ -69,10 +69,22 @@ const BIOME_FILL: [Color; 5] = [
 ];
 
 /// How much of a cap's brightness its wall keeps, applied in **linear** space because that is where
-/// halving the light means halving the light. A wall faces the sky less squarely than the cap above
-/// it, so it reads darker even where the material is identical; this stands in for that until the
-/// shading computes it.
+/// halving the light means halving the light.
+///
+/// A wall is the same material as the cap above it, so in principle this should be 1.0 and the
+/// difference should come from lighting. In practice it cannot: this scene is lit mostly by its
+/// directional sun, and the indirect term a tilted or shut-in surface actually loses is small
+/// enough to be invisible — measured, occluding **all** of a surface's indirect light moves the
+/// median terrain pixel by zero levels of 255. So this stays a deliberate thumb on the scale.
 const WALL_SHADE: f32 = 0.78;
+
+/// The colour of a face steep enough to have nothing growing on it. **Linear**, because it reaches
+/// the shader as a bare `vec3`.
+///
+/// Its own colour rather than the `Rock` biome's: the biome is a band of elevation and this is a
+/// property of slope, and the two only look alike by coincidence. A grassy hillside and the cliff
+/// below it are the same biome.
+const ROCK_FACE: LinearRgba = LinearRgba::rgb(0.10, 0.093, 0.085);
 
 /// The rock the skirt's prism is drawn in. Below the terrain rather than part of it, so it takes no
 /// biome — a cut through the ground shows what is under the ground.
@@ -191,11 +203,22 @@ pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExtension>;
 /// in the same edit.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType, Reflect)]
 pub struct TerrainSettings {
+    /// The colour of exposed rock. **Linear**, like the water's shallow colour and for the same
+    /// reason: it reaches the shader as a bare `vec3` and is mixed there against a base colour the
+    /// material has already converted.
+    pub rock: Vec3,
     /// How far the tint may swing either side of a biome's own colour, as a fraction of it.
     pub tint_amplitude: f32,
+    /// The grid's up axis, from [`HexLayout::plane`]. Written by [`sync_look`] rather than by the
+    /// panel — it is the one field here the view owns and the user does not.
+    pub up: Vec3,
     /// Size of the largest noise feature, in world units — the one number here that has a size, and
     /// the reason this struct lives in the view rather than the model.
     pub tint_wavelength: f32,
+    /// Where rock starts taking over from the biome, and over how much slope it finishes, both in
+    /// units of `1 - dot(normal, up)`: level is 0, a 45° face is 0.29, and vertical is 1.
+    pub rock_onset: f32,
+    pub rock_width: f32,
 }
 
 /// The material extension. Bindings start at 100 because 0-99 belong to the base material.
@@ -222,6 +245,12 @@ pub struct TerrainLook(pub TerrainSettings);
 impl Default for TerrainLook {
     fn default() -> Self {
         Self(TerrainSettings {
+            rock: Vec3::new(ROCK_FACE.red, ROCK_FACE.green, ROCK_FACE.blue),
+            // Overwritten from the layout before it ever reaches a material; this is only what the
+            // struct holds until `spawn_grid` runs.
+            up: Vec3::Y,
+            rock_onset: 0.22,
+            rock_width: 0.30,
             tint_amplitude: 0.28,
             // Under one hexagon at `HEX_SCALE` of 1 — deliberately short. Even the coarsest octave
             // has to vary across a *single* cap, because a cap uniform within itself reads as flat
@@ -238,18 +267,24 @@ impl Default for TerrainLook {
 /// each carries a different base colour; everything the shader reads is identical across them.
 pub fn sync_look(
     look: Res<TerrainLook>,
+    layout: Res<HexLayout>,
     shared: Option<Res<SharedAssets>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
     let Some(shared) = shared else {
         return;
     };
-    if !look.is_changed() {
+    if !look.is_changed() && !layout.is_changed() {
         return;
     }
+    // The up axis is the layout's, not the panel's, and the orientation toggle can move it.
+    let settings = TerrainSettings {
+        up: layout.plane.normal(),
+        ..look.0
+    };
     for handle in shared.cap_materials.iter().chain(&shared.wall_materials) {
         if let Some(mut material) = materials.get_mut(handle) {
-            material.extension.settings = look.0;
+            material.extension.settings = settings;
         }
     }
 }
@@ -396,7 +431,12 @@ pub fn spawn_grid(
                     perceptual_roughness: roughness,
                     ..default()
                 },
-                extension: TerrainExtension { settings: look.0 },
+                extension: TerrainExtension {
+                    settings: TerrainSettings {
+                        up: layout.plane.normal(),
+                        ..look.0
+                    },
+                },
             })
         })
     };
