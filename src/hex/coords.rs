@@ -207,7 +207,11 @@ mod tests {
                     0,
                     "{d:?} should have even col+row ({orientation:?})"
                 );
-                assert_eq!(d.to_axial(orientation), a, "round trip failed ({orientation:?})");
+                assert_eq!(
+                    d.to_axial(orientation),
+                    a,
+                    "round trip failed ({orientation:?})"
+                );
             }
         }
     }
@@ -232,12 +236,20 @@ mod tests {
         // paired with the right variant.
         let east = Axial::ZERO.neighbour(0); // +q, along a pointy-top row
         let pointy = east.to_doubled(Orientation::Pointy);
-        assert_eq!((pointy.col, pointy.row), (2, 0), "pointy row step should double the column");
+        assert_eq!(
+            (pointy.col, pointy.row),
+            (2, 0),
+            "pointy row step should double the column"
+        );
 
         // For flat-top, the column-wise neighbour is the one that steps the doubled row by two.
         let south = Axial::new(0, 1);
         let flat = south.to_doubled(Orientation::Flat);
-        assert_eq!((flat.col, flat.row), (0, 2), "flat column step should double the row");
+        assert_eq!(
+            (flat.col, flat.row),
+            (0, 2),
+            "flat column step should double the row"
+        );
     }
 
     #[test]
@@ -275,9 +287,19 @@ mod tests {
     #[test]
     fn rounding_never_breaks_the_cube_invariant() {
         // Nudges that would break the invariant if components were rounded independently.
-        for (q, r) in [(0.4, 0.4), (0.5, 0.5), (-0.4, 0.6), (1.5, -0.5), (2.49, 2.49)] {
+        for (q, r) in [
+            (0.4, 0.4),
+            (0.5, 0.5),
+            (-0.4, 0.6),
+            (1.5, -0.5),
+            (2.49, 2.49),
+        ] {
             let c = FractionalCube::new(q, r).round();
-            assert_eq!(c.q + c.r + c.s, 0, "rounding ({q}, {r}) broke the invariant");
+            assert_eq!(
+                c.q + c.r + c.s,
+                0,
+                "rounding ({q}, {r}) broke the invariant"
+            );
         }
     }
 }

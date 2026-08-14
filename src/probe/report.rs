@@ -136,7 +136,15 @@ pub struct Diagnostics {
 /// stays a state machine rather than a forty-argument function.
 #[derive(bevy::ecs::system::SystemParam)]
 pub struct ReportSources<'w, 's> {
-    pub camera: Query<'w, 's, (&'static Orbit, &'static Transform, Option<&'static Projection>)>,
+    pub camera: Query<
+        'w,
+        's,
+        (
+            &'static Orbit,
+            &'static Transform,
+            Option<&'static Projection>,
+        ),
+    >,
     pub layout: Res<'w, HexLayout>,
     pub grid: Res<'w, GridModel>,
     pub sea: Res<'w, SeaLevel>,

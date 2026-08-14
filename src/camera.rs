@@ -15,7 +15,7 @@ use bevy::{
     prelude::*,
 };
 
-use crate::view::{selection::pick_point, GridModel, HexLayout};
+use crate::view::{GridModel, HexLayout, selection::pick_point};
 
 const LOOK_SENSITIVITY: f32 = 0.005;
 const ZOOM_SENSITIVITY: f32 = 0.1;
@@ -234,8 +234,8 @@ pub fn orbit(
         // world units tall, so the ground keeps up with the cursor at any zoom instead of merely
         // moving the same way.
         let visible = 2.0 * transform.translation.distance(pivot.0) * (perspective.fov * 0.5).tan();
-        let step =
-            (delta.y * *transform.up() - delta.x * *transform.right()) * (visible / window.height());
+        let step = (delta.y * *transform.up() - delta.x * *transform.right())
+            * (visible / window.height());
         transform.translation += step;
         // The pivot travels with the camera. Left behind, it would be off screen by the end of the
         // pan, and the next turn would swing about a point nobody can see.
@@ -352,7 +352,10 @@ mod tests {
     #[test]
     fn every_advertised_name_parses() {
         for name in pose_names() {
-            assert!(parse_pose(name).is_some(), "{name} is advertised but rejected");
+            assert!(
+                parse_pose(name).is_some(),
+                "{name} is advertised but rejected"
+            );
         }
         assert_eq!(parse_pose("fit"), Some(Pose::Fit));
         // Case and surrounding space come from a shell, where both are easy to introduce.
@@ -362,10 +365,20 @@ mod tests {
     #[test]
     fn numbers_are_read_as_degrees() {
         let orbit = at("90,45,20");
-        assert!((orbit.yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-6, "{orbit:?}");
-        assert!((orbit.pitch - std::f32::consts::FRAC_PI_4).abs() < 1e-6, "{orbit:?}");
+        assert!(
+            (orbit.yaw - std::f32::consts::FRAC_PI_2).abs() < 1e-6,
+            "{orbit:?}"
+        );
+        assert!(
+            (orbit.pitch - std::f32::consts::FRAC_PI_4).abs() < 1e-6,
+            "{orbit:?}"
+        );
         assert_eq!(orbit.radius, 20.0);
-        assert_eq!(orbit.target, Vec3::ZERO, "an orbit pose is about the origin");
+        assert_eq!(
+            orbit.target,
+            Vec3::ZERO,
+            "an orbit pose is about the origin"
+        );
         assert_eq!(at(" 0 , 45 , 20 "), at("0,45,20"), "spaces around fields");
     }
 
@@ -380,8 +393,14 @@ mod tests {
     #[test]
     fn iso_is_the_default_view() {
         let (iso, default) = (at("iso"), Orbit::default());
-        assert!((iso.yaw - default.yaw).abs() < 1e-4, "{iso:?} vs {default:?}");
-        assert!((iso.pitch - default.pitch).abs() < 1e-4, "{iso:?} vs {default:?}");
+        assert!(
+            (iso.yaw - default.yaw).abs() < 1e-4,
+            "{iso:?} vs {default:?}"
+        );
+        assert!(
+            (iso.pitch - default.pitch).abs() < 1e-4,
+            "{iso:?} vs {default:?}"
+        );
         assert_eq!(iso.radius, default.radius);
     }
 
@@ -398,10 +417,21 @@ mod tests {
     #[test]
     fn garbage_is_rejected() {
         for bad in [
-            "", "nope", "0,45", "0,45,20,7", "a,b,c", "0;45;20", ",",
+            "",
+            "nope",
+            "0,45",
+            "0,45,20,7",
+            "a,b,c",
+            "0;45;20",
+            ",",
             // The free form, mis-written every way it can be.
-            "free:0,10,0", "free:0,10@0,0,0", "free:0,10,0@0,0", "free:a,b,c@0,0,0",
-            "free:0,10,0@0,0,0,0", "free:@", "free:",
+            "free:0,10,0",
+            "free:0,10@0,0,0",
+            "free:0,10,0@0,0",
+            "free:a,b,c@0,0,0",
+            "free:0,10,0@0,0,0,0",
+            "free:@",
+            "free:",
         ] {
             assert_eq!(parse_pose(bad), None, "{bad:?} should not parse");
         }
@@ -438,7 +468,12 @@ mod tests {
                 (0.7, TOP_DOWN_PITCH, 12.0),
                 (-2.9, -TOP_DOWN_PITCH, 12.0),
             ] {
-                let orbit = Orbit { yaw, pitch, radius, target };
+                let orbit = Orbit {
+                    yaw,
+                    pitch,
+                    radius,
+                    target,
+                };
                 let there = place(&orbit).translation;
                 let back = rebase(there, target);
 
@@ -481,11 +516,17 @@ mod tests {
         // over, so the raw difference comes out a full turn off.
         use std::f32::consts::{PI, TAU};
         let swung = (heading(&turned) - heading(&start) + PI).rem_euclid(TAU) - PI;
-        assert!((swung + 0.4).abs() < 1e-3, "swung {swung} for a 0.4 rad drag");
+        assert!(
+            (swung + 0.4).abs() < 1e-3,
+            "swung {swung} for a 0.4 rad drag"
+        );
 
         // And it is still not looking at the pivot, which is the snap this exists to avoid.
         let to_pivot = (pivot - turned.translation).normalize();
-        assert!(turned.forward().dot(to_pivot) < 0.99, "the view snapped onto the pivot");
+        assert!(
+            turned.forward().dot(to_pivot) < 0.99,
+            "the view snapped onto the pivot"
+        );
     }
 
     /// A drag that would take the view over the top keeps its yaw and loses only its pitch, rather
@@ -496,14 +537,23 @@ mod tests {
         let mut transform = place(&Orbit::default());
         for _ in 0..20 {
             turn_about(&mut transform, Vec3::ZERO, Vec2::new(0.05, -0.1));
-            assert!(transform.up().y > 0.0, "the horizon tipped over: {transform:?}");
+            assert!(
+                transform.up().y > 0.0,
+                "the horizon tipped over: {transform:?}"
+            );
         }
-        assert!(transform.forward().y < -0.99, "stopped short: {transform:?}");
+        assert!(
+            transform.forward().y < -0.99,
+            "stopped short: {transform:?}"
+        );
 
         // The same going the other way, into looking up from below.
         for _ in 0..40 {
             turn_about(&mut transform, Vec3::ZERO, Vec2::new(0.0, 0.1));
-            assert!(transform.up().y > 0.0, "the horizon tipped over: {transform:?}");
+            assert!(
+                transform.up().y > 0.0,
+                "the horizon tipped over: {transform:?}"
+            );
         }
         assert!(transform.forward().y > 0.99, "stopped short: {transform:?}");
     }

@@ -7,10 +7,10 @@
 
 use bevy::prelude::*;
 
+use super::GridModel;
 use super::compass::{self, ShowCompass};
 use super::layout::HexLayout;
-use super::GridModel;
-use crate::camera::{place, Orbit, MAX_RADIUS, MIN_RADIUS, TOP_DOWN_PITCH};
+use crate::camera::{MAX_RADIUS, MIN_RADIUS, Orbit, TOP_DOWN_PITCH, place};
 use crate::hex::Axial;
 
 /// A little breathing room, so "just visible" is not "clipped at the edge".
@@ -133,7 +133,10 @@ mod tests {
         let with = content_half_extent(&layout, coords().into_iter(), true);
         assert!(with.x >= without.x && with.y >= without.y);
         // The compass sits south of the grid, so it is the vertical extent that must grow.
-        assert!(with.y > without.y, "compass should extend the framing southward");
+        assert!(
+            with.y > without.y,
+            "compass should extend the framing southward"
+        );
     }
 
     #[test]
@@ -161,7 +164,10 @@ mod tests {
 
                 // "Just" visible: no more than the margin's worth of slack on the tighter axis.
                 let slack = (visible_half_height / half.y).min(visible_half_width / half.x);
-                assert!(slack <= MARGIN + 1e-3, "framing is looser than intended: {slack}");
+                assert!(
+                    slack <= MARGIN + 1e-3,
+                    "framing is looser than intended: {slack}"
+                );
             }
         }
     }

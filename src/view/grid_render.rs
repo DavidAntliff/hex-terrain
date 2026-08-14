@@ -42,9 +42,9 @@ use bevy::{
     shader::ShaderRef,
 };
 
+use super::GridModel;
 use super::layout::HexLayout;
 use super::selection::Selected;
-use super::GridModel;
 use crate::hex::{Axial, Terrain, TerrainGrid};
 
 /// Thin outlines for every hex.
@@ -362,9 +362,7 @@ pub fn sync_water(
         for (level, pieces) in water_plates(&layout, &grid, cell.coord) {
             commands.spawn((
                 WaterSurface,
-                Mesh3d(meshes.add(water_fan_mesh(
-                    &layout, &grid, cell.coord, level, pieces,
-                ))),
+                Mesh3d(meshes.add(water_fan_mesh(&layout, &grid, cell.coord, level, pieces))),
                 MeshMaterial3d(shared.water_material.clone()),
                 Transform::from_translation(up * (level - WATER_TIE_BREAK)),
                 ChildOf(entity),
@@ -410,7 +408,10 @@ fn water_plates(layout: &HexLayout, grid: &TerrainGrid, coord: Axial) -> Vec<(f3
     let height = location.data.height;
     let edge: [f32; 6] = core::array::from_fn(|j| edge_height(layout, grid, coord, j));
     let corner: [f32; 6] = core::array::from_fn(|j| corner_height(layout, grid, coord, j));
-    let across = |direction: usize| grid.get(coord.neighbour(direction)).and_then(|l| l.data.water);
+    let across = |direction: usize| {
+        grid.get(coord.neighbour(direction))
+            .and_then(|l| l.data.water)
+    };
 
     let mut plates: Vec<(f32, Pieces)> = Vec::new();
     for j in 0..6 {
@@ -419,7 +420,11 @@ fn water_plates(layout: &HexLayout, grid: &TerrainGrid, coord: Axial) -> Vec<(f3
         let (over_edge, before) = layout.corner_directions(j);
         let after = layout.corner_directions((j + 1) % 6).0;
         for (piece, floor, touching) in [
-            (2 * j, height.min(edge[j]).min(corner[j]), [over_edge, before]),
+            (
+                2 * j,
+                height.min(edge[j]).min(corner[j]),
+                [over_edge, before],
+            ),
             (
                 2 * j + 1,
                 height.min(edge[j]).min(corner[(j + 1) % 6]),
@@ -575,7 +580,9 @@ pub fn draw_outlines(
 /// sits *below* its level rather than above it.
 fn outline_corners(layout: &HexLayout, coord: Axial, terrain: Terrain) -> [Vec3; 6] {
     let centre = layout.surface_centre(coord, terrain.surface() + 2.0 * WATER_TIE_BREAK);
-    layout.corner_offsets().map(|o| centre + o * (1.0 - layout.inset))
+    layout
+        .corner_offsets()
+        .map(|o| centre + o * (1.0 - layout.inset))
 }
 
 /// A flat hexagon at the given fraction of the circumradius, as a fan of six triangles about its
@@ -980,7 +987,7 @@ impl Faces {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hex::{undulating, Grid, Location, Orientation, Terrain};
+    use crate::hex::{Grid, Location, Orientation, Terrain, undulating};
     use crate::view::layout::GridPlane;
 
     const EPS: f32 = 1e-4;
@@ -1161,7 +1168,10 @@ mod tests {
         // And the flat-shaded wall says the same: no triangle of the bridge tilts.
         for (tri, normal) in triangles(&wall_mesh(&layout, &grid, left)) {
             if tri.iter().all(|v| v.dot(up).abs() < EPS) {
-                assert!(normal.abs_diff_eq(up, EPS), "a level piece should face straight up");
+                assert!(
+                    normal.abs_diff_eq(up, EPS),
+                    "a level piece should face straight up"
+                );
             }
         }
     }
@@ -1278,7 +1288,11 @@ mod tests {
                 let floor = 0.5f32
                     .min(edge_height(&layout, &grid, shore, sector))
                     .min(corner_height(&layout, &grid, shore, corner));
-                assert_eq!(*drawn, floor < 0.0, "{shore:?} piece {piece}, floor {floor}");
+                assert_eq!(
+                    *drawn,
+                    floor < 0.0,
+                    "{shore:?} piece {piece}, floor {floor}"
+                );
             }
         }
 
@@ -1404,7 +1418,9 @@ mod tests {
         // The wall towards the lower body is under the higher level — which is what used to carry
         // the higher water across — and above the lower one.
         let towards = |coord: Axial| {
-            let direction = (0..6).find(|&d| bridge.neighbour(d) == coord).expect("adjacent");
+            let direction = (0..6)
+                .find(|&d| bridge.neighbour(d) == coord)
+                .expect("adjacent");
             (0..6)
                 .find(|&e| layout.corner_directions(e).0 == direction)
                 .expect("the edge that way")
@@ -1467,7 +1483,6 @@ mod tests {
             }
         }
     }
-
 
     /// Colours as `[f32; 4]` per vertex, or empty for a mesh that carries none.
     fn colours(mesh: &Mesh) -> Vec<[f32; 4]> {
@@ -1636,7 +1651,10 @@ mod tests {
         let surface = -WATER_TIE_BREAK;
         for (position, colour) in &water {
             let height = position.dot(up);
-            assert!(height <= surface + EPS, "water above its own surface: {height}");
+            assert!(
+                height <= surface + EPS,
+                "water above its own surface: {height}"
+            );
             let expected = shoaled(surface - height);
             assert!(
                 (colour[0] - expected.red).abs() < EPS,
@@ -1696,9 +1714,15 @@ mod tests {
         assert_eq!(brim.len(), 24, "six bridges and six wedges");
         for (tri, _) in brim {
             for v in tri {
-                assert!((v.y - -0.4).abs() < EPS, "{v:?} should be level with the cap");
+                assert!(
+                    (v.y - -0.4).abs() < EPS,
+                    "{v:?} should be level with the cap"
+                );
             }
         }
-        assert_eq!(triangles(&hex_fan_mesh(&layout, 1.0 - layout.inset)).len(), 6);
+        assert_eq!(
+            triangles(&hex_fan_mesh(&layout, 1.0 - layout.inset)).len(),
+            6
+        );
     }
 }

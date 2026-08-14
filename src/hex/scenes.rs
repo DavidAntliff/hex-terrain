@@ -6,7 +6,7 @@
 
 use std::cmp::Ordering;
 
-use super::{flood, undulating, Grid, Terrain, TerrainGrid, SEA_LEVEL};
+use super::{Grid, SEA_LEVEL, Terrain, TerrainGrid, flood, undulating};
 
 /// Hexagon rings around the centre. Radius 3 is a hexagon of side 4: 37 locations.
 pub const RADIUS: i32 = 3;
@@ -18,8 +18,11 @@ pub const DEFAULT: &str = "sea";
 pub type Scene = fn() -> TerrainGrid;
 
 /// Every scene there is, by name.
-pub const SCENES: &[(&str, Scene)] =
-    &[("sea", sea), ("two-lakes", two_lakes), ("terraces", terraces)];
+pub const SCENES: &[(&str, Scene)] = &[
+    ("sea", sea),
+    ("two-lakes", two_lakes),
+    ("terraces", terraces),
+];
 
 /// Builds the named scene, or `None` if there is no such scene.
 pub fn build(name: &str) -> Option<TerrainGrid> {
@@ -215,6 +218,9 @@ mod tests {
             wall(low_bridge, middle) < level(middle),
             "the middle body reaches it"
         );
-        assert!(wall(low_bridge, low) < level(low), "and so does the low body");
+        assert!(
+            wall(low_bridge, low) < level(low),
+            "and so does the low body"
+        );
     }
 }

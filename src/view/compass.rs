@@ -8,7 +8,7 @@
 use bevy::{gizmos::config::GizmoConfigGroup, prelude::*, reflect::Reflect};
 
 use super::layout::HexLayout;
-use super::world_label::{world_label, WorldLabel};
+use super::world_label::{WorldLabel, world_label};
 
 /// Gizmo group for the compass, so its line width is independent of the grid's.
 #[derive(Default, Reflect, GizmoConfigGroup)]

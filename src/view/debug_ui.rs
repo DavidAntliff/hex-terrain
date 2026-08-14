@@ -9,8 +9,8 @@
 use bevy::prelude::*;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{
-    checkbox_self_update, slider_self_update, Activate, Button, Checkbox, Slider, SliderRange,
-    SliderThumb, SliderValue, ValueChange,
+    Activate, Button, Checkbox, Slider, SliderRange, SliderThumb, SliderValue, ValueChange,
+    checkbox_self_update, slider_self_update,
 };
 
 use super::compass::ShowCompass;
@@ -203,12 +203,7 @@ fn spawn_button(panel: &mut ChildSpawnerCommands, control: Control, caption: Str
         });
 }
 
-fn spawn_checkbox(
-    panel: &mut ChildSpawnerCommands,
-    control: Control,
-    checked: bool,
-    name: &str,
-) {
+fn spawn_checkbox(panel: &mut ChildSpawnerCommands, control: Control, checked: bool, name: &str) {
     let mut entity = panel.spawn((
         control,
         Checkbox,

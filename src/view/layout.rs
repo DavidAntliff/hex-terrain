@@ -235,8 +235,7 @@ impl HexLayout {
     /// come from here, so they cannot drift apart.
     pub fn corner_offsets(&self) -> [Vec3; 6] {
         core::array::from_fn(|i| {
-            let angle =
-                std::f32::consts::TAU * (self.orientation.start_angle() + i as f32) / 6.0;
+            let angle = std::f32::consts::TAU * (self.orientation.start_angle() + i as f32) / 6.0;
             self.plane.to_world(Vec2::new(
                 self.size.x * angle.cos(),
                 self.size.y * angle.sin(),
@@ -334,7 +333,11 @@ mod tests {
     #[test]
     fn centre_hex_sits_at_the_layout_origin() {
         let layout = HexLayout::pointy(2.0);
-        assert!(layout.hex_to_world(Axial::ZERO).abs_diff_eq(Vec3::ZERO, EPS));
+        assert!(
+            layout
+                .hex_to_world(Axial::ZERO)
+                .abs_diff_eq(Vec3::ZERO, EPS)
+        );
     }
 
     #[test]
@@ -376,7 +379,10 @@ mod tests {
         // Sign is preserved: a negative height sinks below the plane.
         assert!(layout.elevation(-2.0).abs_diff_eq(Vec3::NEG_Y * 6.0, EPS));
         // Hex size is the in-plane knob and has no say in elevation.
-        assert_eq!(layout.with_scale(40.0).elevation(2.0), layout.elevation(2.0));
+        assert_eq!(
+            layout.with_scale(40.0).elevation(2.0),
+            layout.elevation(2.0)
+        );
         // On the other plane the normal changes, not the magnitude.
         let xy = layout.with_plane(GridPlane::Xy);
         assert!(xy.elevation(2.0).abs_diff_eq(Vec3::Z * 6.0, EPS));
@@ -478,7 +484,9 @@ mod tests {
         let layout = HexLayout::pointy(1.0);
         let offsets = layout.corner_offsets();
         assert!(
-            offsets.iter().any(|o| o.abs_diff_eq(Vec3::new(0.0, 0.0, -1.0), EPS)),
+            offsets
+                .iter()
+                .any(|o| o.abs_diff_eq(Vec3::new(0.0, 0.0, -1.0), EPS)),
             "expected a corner at due north, got {offsets:?}"
         );
     }
@@ -490,17 +498,23 @@ mod tests {
         let flat = HexLayout::pointy(1.0).with_orientation(Orientation::Flat);
         let offsets = flat.corner_offsets();
         assert!(
-            offsets.iter().any(|o| o.abs_diff_eq(Vec3::new(1.0, 0.0, 0.0), EPS)),
+            offsets
+                .iter()
+                .any(|o| o.abs_diff_eq(Vec3::new(1.0, 0.0, 0.0), EPS)),
             "expected a corner due east, got {offsets:?}"
         );
         assert!(
-            !offsets.iter().any(|o| o.abs_diff_eq(Vec3::new(0.0, 0.0, -1.0), EPS)),
+            !offsets
+                .iter()
+                .any(|o| o.abs_diff_eq(Vec3::new(0.0, 0.0, -1.0), EPS)),
             "flat-top should not have a corner due north"
         );
         // And it still round-trips.
         for coord in grid_coords() {
             assert_eq!(
-                flat.world_to_hex(flat.hex_to_world(coord)).round().to_axial(),
+                flat.world_to_hex(flat.hex_to_world(coord))
+                    .round()
+                    .to_axial(),
                 coord
             );
         }
@@ -512,7 +526,10 @@ mod tests {
         let arrows = layout.axis_arrows();
 
         for a in arrows {
-            assert!((a.direction.length() - 1.0).abs() < EPS, "{a:?} not a unit vector");
+            assert!(
+                (a.direction.length() - 1.0).abs() < EPS,
+                "{a:?} not a unit vector"
+            );
         }
 
         // The three positive axes are 120° apart, so each pair dots to -0.5.
@@ -525,13 +542,20 @@ mod tests {
         });
         for i in 0..3 {
             let dot = positives[i].dot(positives[(i + 1) % 3]);
-            assert!((dot + 0.5).abs() < EPS, "axes not 120 degrees apart: dot {dot}");
+            assert!(
+                (dot + 0.5).abs() < EPS,
+                "axes not 120 degrees apart: dot {dot}"
+            );
         }
 
         // Opposite half-axes must actually oppose.
         for (pos, neg) in [("+q", "-q"), ("+r", "-r"), ("+s", "-s")] {
             let find = |l: &str| {
-                arrows.iter().find(|a| a.label == l).expect("axis present").direction
+                arrows
+                    .iter()
+                    .find(|a| a.label == l)
+                    .expect("axis present")
+                    .direction
             };
             assert!(find(pos).abs_diff_eq(-find(neg), EPS));
         }
@@ -549,7 +573,11 @@ mod tests {
                 let hit = corners
                     .iter()
                     .any(|c| c.normalize().abs_diff_eq(arrow.direction, EPS));
-                assert!(hit, "{} does not point at a vertex ({orientation:?})", arrow.label);
+                assert!(
+                    hit,
+                    "{} does not point at a vertex ({orientation:?})",
+                    arrow.label
+                );
             }
         }
     }
@@ -560,9 +588,15 @@ mod tests {
         let layout = HexLayout::pointy(1.0);
         let south = layout.hex_to_world(Axial::new(0, 1));
         assert!(south.z > 0.0, "+r should head toward +z, got {south:?}");
-        assert!(south.x.abs() > 0.0, "+r should also shift east on a pointy layout");
+        assert!(
+            south.x.abs() > 0.0,
+            "+r should also shift east on a pointy layout"
+        );
         // +q is due east.
         let east = layout.hex_to_world(Axial::new(1, 0));
-        assert!(east.x > 0.0 && east.z.abs() < EPS, "+q should be due east, got {east:?}");
+        assert!(
+            east.x > 0.0 && east.z.abs() < EPS,
+            "+q should be due east, got {east:?}"
+        );
     }
 }

@@ -12,7 +12,7 @@ pub mod grid;
 pub mod orientation;
 pub mod scenes;
 
-pub use coords::{Axial, Cube, Doubled, FractionalCube, DIRECTIONS};
+pub use coords::{Axial, Cube, DIRECTIONS, Doubled, FractionalCube};
 pub use grid::{Grid, Location};
 pub use orientation::Orientation;
 
@@ -41,7 +41,8 @@ impl Terrain {
     /// sits above — as against `height`, which is only ever the ground. Guards against water below
     /// the ground it is meant to cover, which [`flood`] never produces but nothing else forbids.
     pub fn surface(&self) -> f32 {
-        self.water.map_or(self.height, |level| level.max(self.height))
+        self.water
+            .map_or(self.height, |level| level.max(self.height))
     }
 }
 
@@ -91,7 +92,11 @@ mod tests {
         // renderer, and this generator hands it seven locations of it every time.
         for q in -3..=3 {
             let height = undulating(Axial::new(q, -q)).height;
-            assert_eq!(height.to_bits(), 0.0f32.to_bits(), "q={q} is not exactly zero");
+            assert_eq!(
+                height.to_bits(),
+                0.0f32.to_bits(),
+                "q={q} is not exactly zero"
+            );
         }
     }
 
@@ -109,17 +114,44 @@ mod tests {
                 location.coord
             );
         }
-        assert!(grid.iter().any(|l| l.data.water.is_some()), "nothing is flooded");
-        assert!(grid.iter().any(|l| l.data.water.is_none()), "everything is flooded");
+        assert!(
+            grid.iter().any(|l| l.data.water.is_some()),
+            "nothing is flooded"
+        );
+        assert!(
+            grid.iter().any(|l| l.data.water.is_none()),
+            "everything is flooded"
+        );
     }
 
     #[test]
     fn a_surface_is_the_water_where_there_is_any_and_the_ground_otherwise() {
-        assert_eq!(Terrain { height: 0.3, water: None }.surface(), 0.3);
-        assert_eq!(Terrain { height: -0.4, water: Some(0.2) }.surface(), 0.2);
+        assert_eq!(
+            Terrain {
+                height: 0.3,
+                water: None
+            }
+            .surface(),
+            0.3
+        );
+        assert_eq!(
+            Terrain {
+                height: -0.4,
+                water: Some(0.2)
+            }
+            .surface(),
+            0.2
+        );
         // Water below the ground it claims to cover is not something `flood` makes, but the ground
         // still wins if it ever appears.
-        assert_eq!(Terrain { height: 0.5, water: Some(-0.5) }.surface(), 0.5);
+        assert_eq!(
+            Terrain {
+                height: 0.5,
+                water: Some(-0.5)
+            }
+            .surface(),
+            0.5
+        );
     }
 
     #[test]

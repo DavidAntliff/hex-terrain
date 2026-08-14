@@ -2,9 +2,9 @@
 
 use bevy::prelude::*;
 
-use super::layout::HexLayout;
-use super::world_label::{world_label, WorldLabel};
 use super::GridModel;
+use super::layout::HexLayout;
+use super::world_label::{WorldLabel, world_label};
 use crate::hex::{Axial, Orientation};
 
 const LABEL_SIZE: f32 = 11.0;

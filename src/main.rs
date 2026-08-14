@@ -1,21 +1,21 @@
 //! A hex grid to iterate terrain work in: a side-4 hexagon of locations under a daylight sky, with
 //! editor-style camera controls, click selection and coordinate labels.
 
-use clap::{builder::PossibleValuesParser, Parser};
+use clap::{Parser, builder::PossibleValuesParser};
 
 use bevy::{
     camera::Exposure,
     camera_controller::free_camera::{FreeCamera, FreeCameraPlugin},
     light::{
-        light_consts::lux, CascadeShadowConfig, CascadeShadowConfigBuilder, EnvironmentMapLight,
-        Skybox,
+        CascadeShadowConfig, CascadeShadowConfigBuilder, EnvironmentMapLight, Skybox,
+        light_consts::lux,
     },
     prelude::*,
     // Not in the prelude, unlike `Window` itself.
     window::{WindowResizeConstraints, WindowResolution},
 };
 
-use hex_terrain::camera::{self, place, Orbit};
+use hex_terrain::camera::{self, Orbit, place};
 use hex_terrain::hex::scenes;
 use hex_terrain::probe::{ProbePlugin, WINDOW};
 use hex_terrain::sky::Sky;

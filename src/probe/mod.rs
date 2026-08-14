@@ -35,9 +35,9 @@ pub mod report;
 
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
-use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
-use crate::camera::{place, Orbit, Pose};
+use crate::camera::{Orbit, Pose, place};
 use crate::view::framing::ResetViewRequested;
 use report::{Report, ReportSources, Run};
 
@@ -125,8 +125,14 @@ impl Plugin for ProbePlugin {
         info!(
             "probe: {} shot(s) after {SETTLE_FRAMES} frames{}{}",
             shots.len(),
-            image.as_deref().map(|p| format!(", images to {p}")).unwrap_or_default(),
-            report.as_deref().map(|p| format!(", reports to {p}")).unwrap_or_default(),
+            image
+                .as_deref()
+                .map(|p| format!(", images to {p}"))
+                .unwrap_or_default(),
+            report
+                .as_deref()
+                .map(|p| format!(", reports to {p}"))
+                .unwrap_or_default(),
         );
 
         if report.is_some() {
@@ -182,9 +188,10 @@ fn parse_interval(spec: Option<&str>) -> (u32, u32) {
     let Some(spec) = spec else {
         return (0, 1);
     };
-    let parsed = spec.trim().split_once(['x', 'X']).and_then(|(f, c)| {
-        Some((f.trim().parse().ok()?, c.trim().parse::<u32>().ok()?.max(1)))
-    });
+    let parsed = spec
+        .trim()
+        .split_once(['x', 'X'])
+        .and_then(|(f, c)| Some((f.trim().parse().ok()?, c.trim().parse::<u32>().ok()?.max(1))));
     parsed.unwrap_or_else(|| {
         eprintln!("bad {INTERVAL} {spec:?}; expected <frames>x<count>, e.g. 30x4");
         std::process::exit(2);

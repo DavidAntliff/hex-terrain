@@ -11,8 +11,8 @@
 use bevy::prelude::*;
 use bevy::{math::primitives::InfinitePlane3d, picking::hover::Hovered};
 
-use super::layout::HexLayout;
 use super::GridModel;
+use super::layout::HexLayout;
 use crate::hex::{Axial, TerrainGrid};
 
 /// The active hex, if any.
@@ -97,7 +97,7 @@ pub fn pick_point(ray: Ray3d, layout: &HexLayout, grid: &TerrainGrid, fallback: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hex::{undulating, Grid, Location, Terrain};
+    use crate::hex::{Grid, Location, Terrain, undulating};
 
     fn down_at(point: Vec3) -> Ray3d {
         Ray3d::new(point + Vec3::Y * 50.0, Dir3::NEG_Y)
@@ -138,8 +138,20 @@ mod tests {
         let layout = HexLayout::pointy(1.0);
         let (column, pit) = (Axial::ZERO, Axial::new(1, 0));
         let mut grid: TerrainGrid = Grid::new();
-        grid.insert(Location::new(column, Terrain { height: 3.0, water: None }));
-        grid.insert(Location::new(pit, Terrain { height: -1.0, water: None }));
+        grid.insert(Location::new(
+            column,
+            Terrain {
+                height: 3.0,
+                water: None,
+            },
+        ));
+        grid.insert(Location::new(
+            pit,
+            Terrain {
+                height: -1.0,
+                water: None,
+            },
+        ));
 
         // Straight down over the column: the column, not the plane it stands on.
         let top = layout.surface_centre(column, 3.0);
@@ -179,9 +191,10 @@ mod tests {
         assert_eq!(pick_point(sky, &layout, &grid, held), held);
 
         // And a ray that does meet terrain still gets the terrain, not the plane under it.
-        let raised = grid.iter().max_by(|a, b| {
-            a.data.surface().total_cmp(&b.data.surface())
-        }).unwrap();
+        let raised = grid
+            .iter()
+            .max_by(|a, b| a.data.surface().total_cmp(&b.data.surface()))
+            .unwrap();
         let surface = layout.surface_centre(raised.coord, raised.data.surface());
         let hit = pick_point(down_at(surface), &layout, &grid, held);
         assert!(hit.distance(surface) < 1e-3, "{hit:?} vs {surface:?}");
@@ -194,7 +207,13 @@ mod tests {
         let layout = HexLayout::pointy(1.0);
         let sunk = Axial::ZERO;
         let mut grid: TerrainGrid = Grid::new();
-        grid.insert(Location::new(sunk, Terrain { height: -1.0, water: Some(0.25) }));
+        grid.insert(Location::new(
+            sunk,
+            Terrain {
+                height: -1.0,
+                water: Some(0.25),
+            },
+        ));
 
         let waterline = layout.surface_centre(sunk, 0.25);
         assert_eq!(hex(down_at(waterline), &layout, &grid), Some(sunk));
