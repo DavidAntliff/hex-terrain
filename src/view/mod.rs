@@ -41,6 +41,7 @@ impl Plugin for HexViewPlugin {
             .init_resource::<compass::ShowCompass>()
             .init_resource::<grid_render::SeaLevel>()
             .init_resource::<grid_render::HideSkirt>()
+            .init_resource::<grid_render::ShowGridLines>()
             .init_resource::<framing::ResetViewRequested>()
             .add_observer(debug_ui::on_button_activate)
             .add_observer(debug_ui::on_checkbox_changed)

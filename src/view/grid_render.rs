@@ -55,6 +55,12 @@ pub struct GridLines;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct Highlight;
 
+/// Whether every hex is outlined. Off unless asked for: the outlines say which hexes can be
+/// clicked, which is a question about the grid rather than part of the scene. The selected hex
+/// keeps its own outline either way.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShowGridLines(pub bool);
+
 const CAP_FILL: Color = Color::srgb(0.16, 0.19, 0.26);
 const WALL_FILL: Color = Color::srgb(0.13, 0.16, 0.22);
 const WATER_FILL: Color = Color::srgb(0.06, 0.20, 0.34);
@@ -554,12 +560,17 @@ pub fn draw_outlines(
     layout: Res<HexLayout>,
     grid: Res<GridModel>,
     selected: Res<Selected>,
+    show_grid_lines: Res<ShowGridLines>,
 ) {
     for location in grid.iter() {
+        let is_selected = selected.0 == Some(location.coord);
+        if !is_selected && !show_grid_lines.0 {
+            continue;
+        }
         let corners = outline_corners(&layout, location.coord, location.data);
         // `linestrip` does not close the loop, so repeat the first corner.
         let loop_ = corners.into_iter().chain(std::iter::once(corners[0]));
-        if selected.0 == Some(location.coord) {
+        if is_selected {
             highlight.linestrip(loop_, ACTIVE_EDGE);
         } else {
             grid_lines.linestrip(loop_, EDGE);
