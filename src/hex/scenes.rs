@@ -22,6 +22,7 @@ pub const SCENES: &[(&str, Scene)] = &[
     ("sea", sea),
     ("two-lakes", two_lakes),
     ("terraces", terraces),
+    ("biomes", biomes),
 ];
 
 /// Builds the named scene, or `None` if there is no such scene.
@@ -110,6 +111,40 @@ fn terraces() -> TerrainGrid {
     })
 }
 
+/// The elevations `biomes` ramps between, low column to high.
+const RAMP: (f32, f32) = (-0.5, 1.0);
+/// Where its outlier peak stands, and how high. Deep in the low ground, so the biome it reaches is
+/// as far as possible from the ones around it.
+const PEAK: (i32, i32) = (-2, 1);
+
+/// A ramp across every biome band, for looking at how the surface is coloured.
+///
+/// Height rises linearly with `q`, so the seven columns of the grid cross all five bands in order
+/// and every consecutive pair of biomes meets along a straight edge. Flooded to [`SEA_LEVEL`], which
+/// submerges the low columns — the sea bed and the strand above it are both sand, so the water line
+/// is the one biome boundary here that is not an elevation threshold.
+///
+/// A ramp alone only ever puts *consecutive* biomes next to each other, which is all a continuous
+/// height field can produce. The outlier peak is what supplies the other case: a stepped terrain can
+/// stand snow directly against sand across a single cliff, and a transition that only has to blend
+/// its immediate neighbour is not the one worth checking.
+fn biomes() -> TerrainGrid {
+    let (low, high) = RAMP;
+    let columns = (2 * RADIUS) as f32;
+    let mut grid = Grid::hexagon(RADIUS, |coord| {
+        let step = (coord.q + RADIUS) as f32 / columns;
+        Terrain {
+            height: low + (high - low) * step,
+            water: None,
+        }
+    });
+    if let Some(peak) = grid.get_mut(super::Axial::new(PEAK.0, PEAK.1)) {
+        peak.data.height = high;
+    }
+    flood(&mut grid, SEA_LEVEL);
+    grid
+}
+
 /// A location under a body of water: its bed, and the level standing over it.
 fn body((bed, level): (f32, f32)) -> Terrain {
     Terrain {
@@ -171,6 +206,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The `biomes` scene earns its place only if it actually shows what it is for: all five
+    /// biomes, every consecutive pair meeting somewhere, and at least one pair that a ramp alone
+    /// could never produce.
+    #[test]
+    fn the_biomes_scene_shows_every_biome_and_a_non_consecutive_pair() {
+        use crate::hex::{Bands, Biome};
+        let bands = Bands::default();
+        let grid = biomes();
+        let biome_at = |coord| Biome::at(&grid.get(coord).expect("in the grid").data, &bands);
+
+        let present: Vec<Biome> = Biome::ALL
+            .into_iter()
+            .filter(|b| grid.iter().any(|l| Biome::at(&l.data, &bands) == *b))
+            .collect();
+        assert_eq!(present, Biome::ALL.to_vec(), "not every biome appears");
+
+        let mut gaps = Vec::new();
+        for location in grid.iter() {
+            let ours = Biome::at(&location.data, &bands);
+            for neighbour in grid.neighbours(location.coord) {
+                let theirs = biome_at(neighbour.coord);
+                gaps.push(ours.index().abs_diff(theirs.index()));
+            }
+        }
+        assert!(
+            gaps.contains(&1),
+            "no two neighbouring cells are consecutive biomes"
+        );
+        assert!(
+            gaps.iter().any(|gap| *gap > 1),
+            "every transition is between consecutive biomes, so the peak is not doing its job"
+        );
     }
 
     /// What `terraces` adds: one bridge only the higher body reaches, and one that both bodies

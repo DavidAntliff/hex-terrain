@@ -45,7 +45,7 @@ use bevy::{
 use super::GridModel;
 use super::layout::HexLayout;
 use super::selection::Selected;
-use crate::hex::{Axial, Terrain, TerrainGrid};
+use crate::hex::{Axial, Bands, Biome, Terrain, TerrainGrid};
 
 /// Thin outlines for every hex.
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -55,8 +55,43 @@ pub struct GridLines;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct Highlight;
 
-const CAP_FILL: Color = Color::srgb(0.16, 0.19, 0.26);
+/// Each biome's cap colour, indexed by [`Biome::index`].
+///
+/// Flat base colours, with nothing in them standing in for detail — variation across a run of one
+/// biome is the shading's job, not the palette's, and a palette that tries to do it makes every cap
+/// of that biome wrong in the same way.
+const BIOME_FILL: [Color; 5] = [
+    Color::srgb(0.78, 0.71, 0.52), // Sand
+    Color::srgb(0.35, 0.51, 0.25), // Grass
+    Color::srgb(0.17, 0.31, 0.19), // Woodland
+    Color::srgb(0.44, 0.43, 0.41), // Rock
+    Color::srgb(0.93, 0.94, 0.96), // Snow
+];
+
+/// How much of a cap's brightness its wall keeps, applied in **linear** space because that is where
+/// halving the light means halving the light. A wall faces the sky less squarely than the cap above
+/// it, so it reads darker even where the material is identical; this stands in for that until the
+/// shading computes it.
+const WALL_SHADE: f32 = 0.78;
+
+/// The rock the skirt's prism is drawn in. Below the terrain rather than part of it, so it takes no
+/// biome — a cut through the ground shows what is under the ground.
 const WALL_FILL: Color = Color::srgb(0.13, 0.16, 0.22);
+
+/// A biome's cap colour.
+fn biome_fill(biome: Biome) -> Color {
+    BIOME_FILL[biome.index()]
+}
+
+/// A biome's wall colour: its cap, dimmed by [`WALL_SHADE`].
+fn biome_wall_fill(biome: Biome) -> Color {
+    let cap = biome_fill(biome).to_linear();
+    Color::LinearRgba(LinearRgba::rgb(
+        cap.red * WALL_SHADE,
+        cap.green * WALL_SHADE,
+        cap.blue * WALL_SHADE,
+    ))
+}
 const WATER_FILL: Color = Color::srgb(0.06, 0.20, 0.34);
 
 /// Colour of water shallow enough to see the bottom through — the pale end of the shoaling ramp,
@@ -158,6 +193,15 @@ pub struct HexCell {
     pub coord: Axial,
 }
 
+/// The child holding a cell's cap: the level hexagon at the location's own height.
+///
+/// The mesh is shared by every location, so this carries the coordinate that says which location's
+/// cap it is — which is what lets one cap's material change without touching the others.
+#[derive(Component)]
+pub struct HexCap {
+    coord: Axial,
+}
+
 /// The child holding a cell's wall ring, which is unique to that cell because it depends on the
 /// neighbours' heights.
 #[derive(Component)]
@@ -189,6 +233,13 @@ pub struct HideSkirt(pub bool);
 pub struct SharedAssets {
     cap: Handle<Mesh>,
     water_material: Handle<WaterMaterial>,
+    /// One cap material per biome, indexed by [`Biome::index`], and one wall material likewise.
+    ///
+    /// A material per biome rather than per location: the biome is the only thing that varies, so
+    /// this is the smallest set that expresses it, and it keeps the caps batching in five groups
+    /// rather than thirty-seven.
+    cap_materials: [Handle<StandardMaterial>; 5],
+    wall_materials: [Handle<StandardMaterial>; 5],
 }
 
 /// A location's water surface, so the set of them can be rebuilt when the level moves.
@@ -205,6 +256,12 @@ impl Default for SeaLevel {
         Self(crate::hex::SEA_LEVEL)
     }
 }
+
+/// The elevations the biomes change at. Dimensionless model values held as a view resource, exactly
+/// as [`SeaLevel`] is — the panel drives them, and the renderer is the only thing that reads them,
+/// because nothing in the model stores a biome to be classified into.
+#[derive(Resource, Debug, Default, PartialEq)]
+pub struct BiomeBands(pub Bands);
 
 /// Writes the sea level into the model, which is what actually decides where water is.
 ///
@@ -247,7 +304,23 @@ pub fn spawn_grid(
     mut water_materials: ResMut<Assets<WaterMaterial>>,
     grid: Res<GridModel>,
     layout: Res<HexLayout>,
+    bands: Res<BiomeBands>,
 ) {
+    let cap_materials = Biome::ALL.map(|biome| {
+        materials.add(StandardMaterial {
+            base_color: biome_fill(biome),
+            perceptual_roughness: 0.9,
+            ..default()
+        })
+    });
+    let wall_materials = Biome::ALL.map(|biome| {
+        materials.add(StandardMaterial {
+            base_color: biome_wall_fill(biome),
+            perceptual_roughness: 0.95,
+            ..default()
+        })
+    });
+
     let shared = SharedAssets {
         cap: meshes.add(hex_fan_mesh(&layout, 1.0 - layout.inset)),
         water_material: water_materials.add(WaterMaterial {
@@ -278,18 +351,10 @@ pub fn spawn_grid(
                 },
             },
         }),
+        cap_materials,
+        wall_materials,
     };
 
-    let cap_material = materials.add(StandardMaterial {
-        base_color: CAP_FILL,
-        perceptual_roughness: 0.9,
-        ..default()
-    });
-    let wall_material = materials.add(StandardMaterial {
-        base_color: WALL_FILL,
-        perceptual_roughness: 0.95,
-        ..default()
-    });
     // White, because the skirt carries its colour per vertex — rock along the prism, and the
     // water's shoaling ramp across a cross-section. The standard material multiplies the two, so
     // anything but white would tint both.
@@ -303,14 +368,16 @@ pub fn spawn_grid(
     let lowest = lowest_height(&grid);
     for location in grid.iter() {
         let coord = location.coord;
+        let biome = Biome::at(&location.data, &bands.0).index();
         commands.spawn((
             HexCell { coord },
             cell_transform(&layout, coord),
             Visibility::default(),
             children![
                 (
+                    HexCap { coord },
                     Mesh3d(shared.cap.clone()),
-                    MeshMaterial3d(cap_material.clone()),
+                    MeshMaterial3d(shared.cap_materials[biome].clone()),
                     // The cap rides at the location's own height; the parent's scale turns that
                     // dimensionless height into world units along with everything else.
                     Transform::from_translation(up * location.data.height),
@@ -318,7 +385,7 @@ pub fn spawn_grid(
                 (
                     HexWall { coord },
                     Mesh3d(meshes.add(wall_mesh(&layout, &grid, coord))),
-                    MeshMaterial3d(wall_material.clone()),
+                    MeshMaterial3d(shared.wall_materials[biome].clone()),
                 ),
                 (
                     HexSkirt { coord },
@@ -506,6 +573,55 @@ pub fn sync_cells(
     for (wall, handle) in &walls {
         if let Some(mut mesh) = meshes.get_mut(&handle.0) {
             *mesh = wall_mesh(&layout, &grid, wall.coord);
+        }
+    }
+}
+
+/// Repaints every cap and wall when the biome a location falls in could have moved — which is a
+/// change to the model, since heights and water are what a biome is derived from, or a change to the
+/// bands themselves.
+///
+/// A guard of its own rather than a clause added to [`sync_cells`], which watches the layout alone
+/// because geometry is all it rebuilds and no model change moves any of it. A biome is the one thing
+/// a location presents that the layout has no part in.
+///
+/// The two queries exclude each other so Bevy can see they are disjoint. A `With` filter does not
+/// prove that on its own — an entity could carry both markers — and the mutable access to the same
+/// component type would otherwise be rejected.
+pub fn sync_biomes(
+    grid: Res<GridModel>,
+    bands: Res<BiomeBands>,
+    shared: Option<Res<SharedAssets>>,
+    mut caps: Query<(&HexCap, &mut MeshMaterial3d<StandardMaterial>), Without<HexWall>>,
+    mut walls: Query<(&HexWall, &mut MeshMaterial3d<StandardMaterial>), Without<HexCap>>,
+) {
+    let Some(shared) = shared else {
+        return;
+    };
+    if !grid.is_changed() && !bands.is_changed() {
+        return;
+    }
+
+    let biome = |coord| {
+        grid.get(coord)
+            .map(|l| Biome::at(&l.data, &bands.0).index())
+    };
+    // Assigned only where it actually differs. Writing the same handle back would still mark the
+    // component changed, and a drag of the sea-level slider moves the biome of very few locations.
+    let repaint = |material: &mut MeshMaterial3d<StandardMaterial>, wanted: &Handle<_>| {
+        if material.0 != *wanted {
+            material.0 = wanted.clone();
+        }
+    };
+
+    for (cap, mut material) in &mut caps {
+        if let Some(index) = biome(cap.coord) {
+            repaint(&mut material, &shared.cap_materials[index]);
+        }
+    }
+    for (wall, mut material) in &mut walls {
+        if let Some(index) = biome(wall.coord) {
+            repaint(&mut material, &shared.wall_materials[index]);
         }
     }
 }

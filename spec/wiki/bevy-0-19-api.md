@@ -301,6 +301,26 @@ conflicts from the signature, not from the control flow. Wrapping them as
 a whole custom `SystemParam` nests inside a `ParamSet` unchanged. Note that the panic message is
 useless by default — every name reads `<Enable the debug feature to see the name>`.
 
+## Two queries are disjoint through `Without`, never through `With`
+
+The same B0001 conflict appears between two ordinary queries taking the same component mutably, and
+the fix is different. Marker components are *not* enough:
+
+```rust
+// Rejected: an entity could carry both markers, so the accesses may overlap.
+caps:  Query<&mut MeshMaterial3d<StandardMaterial>, With<HexCap>>,
+walls: Query<&mut MeshMaterial3d<StandardMaterial>, With<HexWall>>,
+
+// Accepted: each excludes the other, which is what makes them provably disjoint.
+caps:  Query<&mut MeshMaterial3d<StandardMaterial>, Without<HexWall>>,
+walls: Query<&mut MeshMaterial3d<StandardMaterial>, Without<HexCap>>,
+```
+
+Bevy proves disjointness only from a `Without` on one side matching a `With` on the other — that a
+cap entity never carries `HexWall` is a fact about how they are spawned, and the access checker
+cannot see it. The `&HexCap` in the fetch supplies the `With` half implicitly, so only the `Without`
+has to be written. `ParamSet` also works, at the cost of `p0()`/`p1()` at every use.
+
 ## Mesh primitives
 
 `Extrusion<T: Primitive2d>` exists and `Extrusion<RegularPolygon>` is `Meshable` and `Into<Mesh>`

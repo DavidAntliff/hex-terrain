@@ -1,10 +1,10 @@
 //! Top-right readout for the selected hex, and the controls that drive the view.
 //!
-//! Six controls: a button cycling the label mode (including off), a button toggling the hexagon
+//! Nine controls: a button cycling the label mode (including off), a button toggling the hexagon
 //! orientation, checkboxes for the compass and for hiding the terrain's skirt, sliders for the sea
-//! level and the cap inset, and a button that frames the whole scene from overhead. The
-//! state-carrying buttons cycle rather than offering radio lists, because this is a debug panel and
-//! a cycle is one entity and one observer arm.
+//! level, the cap inset, the shoreline and the snow line, and a button that frames the whole scene
+//! from overhead. The state-carrying buttons cycle rather than offering radio lists, because this is
+//! a debug panel and a cycle is one entity and one observer arm.
 
 use bevy::prelude::*;
 use bevy::ui::Checked;
@@ -15,7 +15,7 @@ use bevy::ui_widgets::{
 
 use super::compass::ShowCompass;
 use super::framing::ResetViewRequested;
-use super::grid_render::{HideSkirt, SeaLevel};
+use super::grid_render::{BiomeBands, HideSkirt, SeaLevel};
 use super::labels::LabelMode;
 use super::layout::HexLayout;
 use super::selection::Selected;
@@ -36,6 +36,15 @@ const SEA_LEVEL_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
 /// edge and nowhere else. Half the circumradius is where a cap has shrunk to a quarter of its area
 /// and the walls are all there is left to see; past that there is nothing to look at.
 const INSET_RANGE: std::ops::RangeInclusive<f32> = 0.0..=50.0;
+
+/// The band sliders' travel, in the same units as a height, and the same span as the terrain — a
+/// threshold outside it would simply retire the biomes either side of it.
+///
+/// Two of the four thresholds are on the panel: the one where sand gives way to grass, which is the
+/// shoreline, and the one where rock gives way to snow, which is the snow line. Those are the two
+/// with somewhere obvious to sit, so they are the two worth dragging; the woodland and rock bands
+/// stay where [`Bands::default`] puts them.
+const BAND_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
 
 /// The thumb's width as a percentage of the track, kept out of the travel so it cannot overhang
 /// either end.
@@ -60,6 +69,8 @@ pub enum Control {
     HideSkirt,
     SeaLevel,
     Inset,
+    Shoreline,
+    SnowLine,
     ResetView,
 }
 
@@ -74,6 +85,7 @@ pub fn spawn_debug_ui(
     show_compass: Res<ShowCompass>,
     hide_skirt: Res<HideSkirt>,
     sea: Res<SeaLevel>,
+    bands: Res<BiomeBands>,
 ) {
     commands
         .spawn((
@@ -124,6 +136,20 @@ pub fn spawn_debug_ui(
                 inset_percent,
                 INSET_RANGE,
                 inset_caption(inset_percent),
+            );
+            spawn_slider(
+                panel,
+                Control::Shoreline,
+                bands.0.grass,
+                BAND_RANGE,
+                shoreline_caption(bands.0.grass),
+            );
+            spawn_slider(
+                panel,
+                Control::SnowLine,
+                bands.0.snow,
+                BAND_RANGE,
+                snow_line_caption(bands.0.snow),
             );
             spawn_button(panel, Control::ResetView, RESET_CAPTION.to_string());
         });
@@ -251,6 +277,17 @@ fn inset_caption(percent: f32) -> String {
     format!("inset: {percent:.0}%")
 }
 
+/// Named for what the threshold *is* on the ground rather than for the band it opens. The elevation
+/// where sand gives way to grass is the shoreline, and reading it as "grass band" would say where
+/// the number lives instead of what moving it does.
+fn shoreline_caption(level: f32) -> String {
+    format!("shoreline: {level:+.2}")
+}
+
+fn snow_line_caption(level: f32) -> String {
+    format!("snow line: {level:+.2}")
+}
+
 /// Puts each thumb where its value says. The widget deliberately leaves this to the caller, since
 /// it cannot know how the thumb is drawn; the travel is reduced by the thumb's own width so it
 /// stops flush with either end of the track rather than hanging over it.
@@ -311,6 +348,7 @@ pub fn on_slider_changed(
     controls: Query<&Control>,
     mut sea: ResMut<SeaLevel>,
     mut layout: ResMut<HexLayout>,
+    mut bands: ResMut<BiomeBands>,
 ) {
     match controls.get(change.source) {
         Ok(Control::SeaLevel) if sea.0 != change.value => sea.0 = change.value,
@@ -321,6 +359,8 @@ pub fn on_slider_changed(
                 layout.inset = inset;
             }
         }
+        Ok(Control::Shoreline) if bands.0.grass != change.value => bands.0.grass = change.value,
+        Ok(Control::SnowLine) if bands.0.snow != change.value => bands.0.snow = change.value,
         _ => {}
     }
 }
@@ -331,6 +371,7 @@ pub fn update_captions(
     show_compass: Res<ShowCompass>,
     hide_skirt: Res<HideSkirt>,
     sea: Res<SeaLevel>,
+    bands: Res<BiomeBands>,
     mut captions: Query<(&ControlCaption, &mut Text)>,
 ) {
     if !mode.is_changed()
@@ -338,6 +379,7 @@ pub fn update_captions(
         && !show_compass.is_changed()
         && !hide_skirt.is_changed()
         && !sea.is_changed()
+        && !bands.is_changed()
     {
         return;
     }
@@ -349,6 +391,8 @@ pub fn update_captions(
             Control::HideSkirt => checkbox_caption(hide_skirt.0, SKIRT_CAPTION),
             Control::SeaLevel => sea_level_caption(sea.0),
             Control::Inset => inset_caption(layout.inset * 100.0),
+            Control::Shoreline => shoreline_caption(bands.0.grass),
+            Control::SnowLine => snow_line_caption(bands.0.snow),
             Control::ResetView => RESET_CAPTION.to_string(),
         };
     }

@@ -566,3 +566,37 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   harness. Screenshots at 8% and 25% show caps, walls, skirts and outlines moving together, and the
   report reads `layout.inset` 0.08 and 0.25 with `run.scene` correct. **Not verified:** dragging
   the inset slider — it has only been preset, as no pointer-injection tool exists here.
+
+## [2026-08-14] feature | five biomes, derived from elevation rather than stored
+
+- **A biome is a function, not a field.** `Biome::at(&Terrain, &Bands)` in `src/hex/biome.rs`
+  classifies a location from the height and water it already has. Nothing authors biomes — there is
+  no generator and no editor — so a field on `Terrain` would be written by this same formula at
+  construction and merely cached. It would also not be free: **no `Terrain` literal in the tree uses
+  `..default()`**, so all ~20 exhaustive constructions across `scenes.rs`, `hex/mod.rs` and four test
+  modules would have to name a value nothing yet varies. When something does author biomes, an
+  `Option<Biome>` overriding this is the extension, and this becomes the `None` case. See [[biomes]].
+- **Submerged ground is sand, whatever its elevation.** The sea bed and the strand above it are the
+  same material, so the water line is where the ground stops being wet rather than where it changes
+  kind. Without that rule a flooded mountain basin draws its bed as snow through the water.
+- **`With` does not prove two queries disjoint; `Without` does.** `sync_biomes` takes mutable
+  `MeshMaterial3d<StandardMaterial>` twice, once for caps and once for walls. Bevy rejects that on
+  `With<HexCap>` / `With<HexWall>` alone, because an entity could carry both markers — the pair has
+  to exclude each other explicitly. Recorded in [[bevy-0-19-api]].
+- **The cap got a marker it should always have had.** `probe/report.rs` identified a cap by what it
+  was *not* — `(Without<HexWall>, Without<HexSkirt>, Without<WaterSurface>)` — so every new kind of
+  cell child had to be remembered there or be silently counted as a cap. `HexCap` makes it positive,
+  and is what `sync_biomes` needed anyway to repaint one location's cap without touching the rest.
+- **A model-only change reached nothing before this.** `sync_cells` guards on `layout.is_changed()`,
+  which is right for geometry — no model change moves any of it — but a biome is the one thing a
+  location presents that the layout has no part in. Hence a system and a guard of its own.
+- **A ramp only ever makes *consecutive* biomes adjacent**, which is all a continuous height field
+  can produce. The `biomes` scene therefore carries an outlier peak at `(-2,1)`, standing snow
+  directly against the low ground: a stepped terrain can do that across one cliff, and a transition
+  that only ever meets its immediate neighbour is not the one worth testing. A test asserts both that
+  every biome appears and that some neighbouring pair is non-consecutive.
+- Verified: 99 tests (92 lib, up 7, plus 7 in the binary), `cargo clippy --all-targets` clean,
+  screenshots of `biomes` at `top`/`iso`/`low` and `sea` at `iso`, pinned to 1280x720. **Not
+  verified:** dragging the two new sliders, for the same reason the inset slider was not — there is
+  no pointer-injection tool here. The panel's own control count in `debug_ui.rs` was already one
+  stale before this change; it is now nine in both that doc comment and `README.md`.

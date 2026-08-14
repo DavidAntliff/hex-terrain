@@ -35,10 +35,10 @@ Turning is on the middle button rather than Unity's `Alt`+left because i3 — an
 managers — grab `Alt`+drag for themselves before the app ever sees it.
 
 The panel top right reports the selected hexagon in axial, cube and doubled coordinates plus world
-position, and carries seven controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
+position, and carries nine controls: cycle the per-hex labels (axial / cube / doubled / off), toggle
 pointy-top against flat-top, show or hide the axis compass, hide the skirt to see the terrain as a
-bare shell, move the sea level, shrink or widen the cap inset, and reset the view to look straight
-down with everything in frame.
+bare shell, move the sea level, shrink or widen the cap inset, raise or lower the shoreline and the
+snow line, and reset the view to look straight down with everything in frame.
 
 See `spec/camera-controls.md` for why the bindings are these ones.
 
@@ -100,7 +100,11 @@ only way to reach the inset there.
 - `terraces` — three bodies at three levels over two bridges, one tall enough that only the upper body
   reaches it and one low enough that both do.
 
-The last two are diagnostics for how a water surface is divided between bodies where they come close.
+- `biomes` — a ramp across every biome band, with one outlier peak that stands snow directly against
+  the low ground. For looking at how the surface is coloured and how one biome gives way to another.
+
+`two-lakes` and `terraces` are diagnostics for how a water surface is divided between bodies where
+they come close.
 
 Bevy is linked dynamically on native targets, which cuts an edit-rebuild cycle from ~40s to
 ~2s. The binary therefore needs `libbevy_dylib.so` alongside it at runtime — `cargo run` handles

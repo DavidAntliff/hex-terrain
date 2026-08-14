@@ -41,6 +41,7 @@ impl Plugin for HexViewPlugin {
             .init_resource::<compass::ShowCompass>()
             .init_resource::<grid_render::SeaLevel>()
             .init_resource::<grid_render::HideSkirt>()
+            .init_resource::<grid_render::BiomeBands>()
             .init_resource::<framing::ResetViewRequested>()
             .add_observer(debug_ui::on_button_activate)
             .add_observer(debug_ui::on_checkbox_changed)
@@ -67,6 +68,8 @@ impl Plugin for HexViewPlugin {
                     grid_render::sync_water.after(grid_render::apply_sea_level),
                     // A rim skirt carries a cross-section of that same water.
                     grid_render::sync_skirts.after(grid_render::apply_sea_level),
+                    // And water is half of what a biome is derived from, so this waits on it too.
+                    grid_render::sync_biomes.after(grid_render::apply_sea_level),
                     grid_render::sync_skirt_visibility,
                     debug_ui::position_slider_thumbs,
                     // Everything that reacts to the layout changing — scale, or the orientation

@@ -45,9 +45,11 @@ In scope: the height attribute and its placeholder generator, the world-unit hei
 and wall meshes and the rule that joins them, per-location water surfaces, cap-anchored labels and
 outlines, picking by footprint, and shadows with ambient fill.
 
-Out of scope: real terrain generation (the sinusoid is a placeholder), height editing at runtime,
-biome or any other payload, per-height colouring, and anything that makes water behave rather than
-merely sit there — flow, waves, transparency, refraction.
+Out of scope: real terrain generation (the sinusoid is a placeholder), height editing at runtime, any
+payload on a location beyond height and water, and anything that makes water behave rather than
+merely sit there — flow, waves, transparency, refraction. Biomes and surface colouring were also out
+of scope here and are now [[biomes]]'s, which builds the blend across the wall that the cap/wall
+split was kept separate for.
 
 ## Design discussion
 
@@ -342,5 +344,6 @@ Deliberate omissions:
 - [[hex-coordinates]]: the corner↔direction relationship the walls are built on
 - [[bevy-0-19-api]]: the shadow, gizmo and primitive facts this depends on
 - [[water]]: how the water plates this spec places are shaded
+- [[biomes]]: what colours this surface, and the blend across the wall between two of them
 - [[skirt]]: what closes this surface from below, and cuts through its water at the rim
 - [[scene]]: the shell it is displayed in, and the lighting it adds to
