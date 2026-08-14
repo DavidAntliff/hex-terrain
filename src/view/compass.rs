@@ -30,15 +30,9 @@ const Q_COLOR: Color = Color::srgb(0.96, 0.45, 0.45);
 const R_COLOR: Color = Color::srgb(0.50, 0.86, 0.55);
 const S_COLOR: Color = Color::srgb(0.55, 0.68, 0.98);
 
-/// Whether the compass is drawn.
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+/// Whether the compass is drawn. Off unless asked for.
+#[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShowCompass(pub bool);
-
-impl Default for ShowCompass {
-    fn default() -> Self {
-        Self(true)
-    }
-}
 
 /// The compass root. Its transform positions the whole widget.
 #[derive(Component)]

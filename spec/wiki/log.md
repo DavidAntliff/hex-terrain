@@ -566,3 +566,12 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   harness. Screenshots at 8% and 25% show caps, walls, skirts and outlines moving together, and the
   report reads `layout.inset` 0.08 and 0.25 with `run.scene` correct. **Not verified:** dragging
   the inset slider — it has only been preset, as no pointer-injection tool exists here.
+
+## [2026-08-14] change | a quieter default view
+
+- The startup view now shows neither the compass nor the per-hex coordinates, and the cap inset
+  starts at 25%: `ShowCompass` derives `Default` (false), `LabelMode`'s `#[default]` moved to
+  `Off`, `DEFAULT_INSET` is `0.25`. All three remain togglable from the panel and `--inset`.
+- Verified: `cargo test` — 92 tests pass, `cargo clippy --all-targets` clean, and
+  `HEX_TERRAIN_REPORT=- HEX_TERRAIN_CAMERA=top cargo run` reports `layout.inset` `0.25`,
+  `labels` `off` and `compass` `false` with no flags. Not verified: the window by eye.

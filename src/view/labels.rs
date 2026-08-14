@@ -16,10 +16,10 @@ const LABEL_COLOR: Color = Color::srgb(0.85, 0.89, 0.95);
 /// governing the labels instead of two that could disagree.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelMode {
-    #[default]
     Axial,
     Cube,
     Doubled,
+    #[default]
     Off,
 }
 
