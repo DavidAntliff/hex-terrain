@@ -44,6 +44,7 @@ impl Plugin for HexViewPlugin {
             .init_resource::<grid_render::HideSkirt>()
             .init_resource::<grid_render::BiomeBands>()
             .init_resource::<grid_render::TerrainLook>()
+            .init_resource::<grid_render::ShowGridLines>()
             .init_resource::<framing::ResetViewRequested>()
             .add_observer(debug_ui::on_button_activate)
             .add_observer(debug_ui::on_checkbox_changed)

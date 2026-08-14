@@ -197,6 +197,9 @@ Load-bearing details:
 - `layout.inset` is the fraction, not the `--inset` percentage — it is `HexLayout::inset` verbatim,
   so the report says what the meshes were built from whether the value came from the argument or
   the panel slider.
+- `layout` reports the view toggles that change what a screenshot shows — `labels`, `compass`,
+  `grid_lines` — which is what makes a default-off feature checkable without eyes on the window.
+  `hide_skirt` is the exception, and only because nothing has needed it yet.
 - A cell's cap carries no marker of its own — it is the meshed child that is neither `HexWall` nor
   `WaterSurface` — so it is found through `Children` on `HexCell`.
 - `model.water_levels` is the **distinct levels, ascending**: a lower bound on the number of bodies,

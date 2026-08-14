@@ -576,6 +576,20 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   `HEX_TERRAIN_REPORT=- HEX_TERRAIN_CAMERA=top cargo run` reports `layout.inset` `0.25`,
   `labels` `off` and `compass` `false` with no flags. Not verified: the window by eye.
 
+## [2026-08-14] change | grid outlines off by default, behind a panel checkbox
+
+- The cyan per-hex outlines now start hidden. `ShowGridLines` (defaults false, in `grid_render`)
+  gates `draw_outlines`; a `grid lines` checkbox in the panel turns them on, the same three-line
+  pattern as `compass` and `hide skirt`.
+- The selected hex keeps its amber outline regardless — the check is per location, before the
+  corners are computed, so hidden outlines also cost nothing to build.
+- `probe`'s `layout.grid_lines` reports the state, which is what made this verifiable headlessly;
+  `hide_skirt` still is not reported.
+- Verified: `cargo test` — 92 tests pass, `cargo clippy --all-targets` clean, and screenshots
+  from `HEX_TERRAIN_CAMERA=top` with the resource forced true and left at its default show the
+  outlines present and absent, with the report reading `grid_lines` `true` and `false` to match.
+  Not verified: clicking the checkbox itself, as no pointer-injection tool exists here.
+
 ## [2026-08-14] feature | five biomes, derived from elevation rather than stored
 
 - **A biome is a function, not a field.** `Biome::at(&Terrain, &Bands)` in `src/hex/biome.rs`

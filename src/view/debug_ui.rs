@@ -1,11 +1,12 @@
 //! Top-right readout for the selected hex, and the controls that drive the view.
 //!
-//! Fifteen controls: a button cycling the label mode (including off), a button toggling the hexagon
-//! orientation, checkboxes for the compass and for hiding the terrain's skirt, sliders for the sea
-//! level, the cap inset, the shoreline, the snow line, the two tint knobs, the slope rock takes
-//! over at, the two that shape the blend between biomes and the bump, and a button that frames
-//! the whole scene from overhead. The state-carrying buttons cycle rather than offering radio
-//! lists, because this is a debug panel and a cycle is one entity and one observer arm.
+//! Sixteen controls: a button cycling the label mode (including off), a button toggling the
+//! hexagon orientation, checkboxes for the compass, for hiding the terrain's skirt and for the
+//! per-hex outlines, sliders for the sea level, the cap inset, the shoreline, the snow line, the
+//! two tint knobs, the slope rock takes over at, the two that shape the blend between biomes and
+//! the bump, and a button that frames the whole scene from overhead. The state-carrying buttons
+//! cycle rather than offering radio lists, because this is a debug panel and a cycle is one entity
+//! and one observer arm.
 
 use bevy::prelude::*;
 use bevy::ui::Checked;
@@ -16,7 +17,7 @@ use bevy::ui_widgets::{
 
 use super::compass::ShowCompass;
 use super::framing::ResetViewRequested;
-use super::grid_render::{BiomeBands, HideSkirt, SeaLevel, TerrainLook};
+use super::grid_render::{BiomeBands, HideSkirt, SeaLevel, ShowGridLines, TerrainLook};
 use super::labels::LabelMode;
 use super::layout::HexLayout;
 use super::selection::Selected;
@@ -75,6 +76,7 @@ const EMPTY_READOUT: &str = "click a hexagon";
 const RESET_CAPTION: &str = "reset view";
 const COMPASS_CAPTION: &str = "compass";
 const SKIRT_CAPTION: &str = "hide skirt";
+const GRID_LINES_CAPTION: &str = "grid lines";
 
 /// The readout text node.
 #[derive(Component)]
@@ -87,6 +89,7 @@ pub enum Control {
     Orientation,
     Compass,
     HideSkirt,
+    GridLines,
     SeaLevel,
     Inset,
     Shoreline,
@@ -114,6 +117,7 @@ pub fn spawn_debug_ui(
     layout: Res<HexLayout>,
     show_compass: Res<ShowCompass>,
     hide_skirt: Res<HideSkirt>,
+    show_grid_lines: Res<ShowGridLines>,
     sea: Res<SeaLevel>,
     bands: Res<BiomeBands>,
     look: Res<TerrainLook>,
@@ -153,6 +157,12 @@ pub fn spawn_debug_ui(
             );
             spawn_checkbox(panel, Control::Compass, show_compass.0, COMPASS_CAPTION);
             spawn_checkbox(panel, Control::HideSkirt, hide_skirt.0, SKIRT_CAPTION);
+            spawn_checkbox(
+                panel,
+                Control::GridLines,
+                show_grid_lines.0,
+                GRID_LINES_CAPTION,
+            );
             spawn_slider(
                 panel,
                 Control::SeaLevel,
@@ -431,10 +441,12 @@ pub fn on_checkbox_changed(
     controls: Query<&Control>,
     mut show_compass: ResMut<ShowCompass>,
     mut hide_skirt: ResMut<HideSkirt>,
+    mut show_grid_lines: ResMut<ShowGridLines>,
 ) {
     match controls.get(change.source) {
         Ok(Control::Compass) => show_compass.0 = change.value,
         Ok(Control::HideSkirt) => hide_skirt.0 = change.value,
+        Ok(Control::GridLines) => show_grid_lines.0 = change.value,
         _ => {}
     }
 }
@@ -493,6 +505,7 @@ pub fn update_captions(
     layout: Res<HexLayout>,
     show_compass: Res<ShowCompass>,
     hide_skirt: Res<HideSkirt>,
+    show_grid_lines: Res<ShowGridLines>,
     sea: Res<SeaLevel>,
     bands: Res<BiomeBands>,
     look: Res<TerrainLook>,
@@ -502,6 +515,7 @@ pub fn update_captions(
         && !layout.is_changed()
         && !show_compass.is_changed()
         && !hide_skirt.is_changed()
+        && !show_grid_lines.is_changed()
         && !sea.is_changed()
         && !bands.is_changed()
         && !look.is_changed()
@@ -514,6 +528,7 @@ pub fn update_captions(
             Control::Orientation => orientation_caption(layout.orientation),
             Control::Compass => checkbox_caption(show_compass.0, COMPASS_CAPTION),
             Control::HideSkirt => checkbox_caption(hide_skirt.0, SKIRT_CAPTION),
+            Control::GridLines => checkbox_caption(show_grid_lines.0, GRID_LINES_CAPTION),
             Control::SeaLevel => sea_level_caption(sea.0),
             Control::Inset => inset_caption(layout.inset * 100.0),
             Control::Shoreline => shoreline_caption(bands.0.grass),

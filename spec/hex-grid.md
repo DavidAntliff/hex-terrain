@@ -15,11 +15,11 @@ readout. Follows <https://www.redblobgames.com/grids/hexagons/>.
 ### Goal (definition of done)
 
 A grid of hex locations, each addressable in axial, cube and doubled coordinates and convertible to
-a world position, displayed as 37 hexagons (a hexagon of side 4) meeting edge to edge with contrasting
-outlines, in either orientation. Left-click selects a hex and marks it with a bold outline; a top-right
-panel reports the selected hex in all three coordinate systems plus world xyz. Controls cycle the
-per-hex labels through the systems and off, toggle pointy/flat, show or hide the compass, and frame
-the whole scene from directly overhead. A compass shows where the six half-axes point. The **centre
+a world position, displayed as 37 hexagons (a hexagon of side 4) meeting edge to edge, in either
+orientation, with contrasting outlines available on demand. Left-click selects a hex and marks it
+with a bold outline; a top-right panel reports the selected hex in all three coordinate systems plus
+world xyz. Controls cycle the per-hex labels through the systems and off, toggle pointy/flat, show or
+hide the compass and the grid outlines, and frame the whole scene from directly overhead. A compass shows where the six half-axes point. The **centre
 hex is the origin of every system**, world position included.
 
 ### Constraints
@@ -95,18 +95,26 @@ per location, at its own elevation, instead of a single plane for the whole grid
 highlighted costs nothing and needs no material swapping. Line width and depth bias are per config
 group, hence three groups: thin grid lines, the thick highlight, and the compass.
 
+**The thin outlines are off by default.** They say which hexes exist and can be clicked, which is a
+question about the grid rather than part of the scene — the same reasoning that put the compass and
+the coordinate labels behind their own controls. `ShowGridLines` gates them; the selected hex keeps
+its highlight either way, since a selection with nothing marking it would be a readout with no
+picture. Being immediate-mode, hidden outlines cost nothing at all: the check is per location,
+before any corner is computed.
+
 **Camera framing is computed, not tuned.** The reset-view button derives its distance from the
 camera's actual vertical field of view and aspect ratio. A constant cannot be right for all window
 shapes: the horizontal extent of the view scales with the aspect ratio, so a hand-picked distance that
 frames the scene in a landscape window clips it in a portrait one. This replaced two hand-tuned
 constants that had already been adjusted three times by observation.
 
-**Controls are cycling buttons plus a checkbox, not radio lists.** `bevy_ui_widgets` has radio groups,
+**Controls are cycling buttons plus checkboxes, not radio lists.** `bevy_ui_widgets` has radio groups,
 but a cycle is one entity and one observer arm, and this is a debug panel. "No labels" is a fourth
 `LabelMode` rather than a separate flag, so a single piece of state governs the labels and there is
 nothing to disagree with. [[terrain]] added a fifth control, a slider, for a value that is
 continuous rather than a choice between named states, and then a sixth of the same kind for the cap
-inset. `spawn_slider` therefore takes its range and its caption as arguments — the caption because
+inset, and this spec a third checkbox for the outlines. `spawn_slider` therefore takes its range and
+its caption as arguments — the caption because
 each slider reads in its own units, and the range because the sea level travels `-1..=1` in height
 units while the inset travels `0..=50` in percent.
 
@@ -216,7 +224,8 @@ Details that are load-bearing:
 - Wiring: the app's grid is the one this spec describes, and the centre hex is the origin of all
   three coordinate systems and of world space, in either orientation.
 
-Visually, via `HEX_TERRAIN_SCREENSHOT`: 37 hexes meeting edge to edge with cyan outlines, axial
+Visually, via `HEX_TERRAIN_SCREENSHOT`, every state preset rather than clicked: 37 hexes meeting
+edge to edge with the cyan outlines on and off — `probe` reports `layout.grid_lines` to match — axial
 labels with `0,0` at the centre, the compass showing `-r` north / `+q` ENE / `+s` WNW with its
 arrows on the reference hexagon's vertices. With a hex preset as selected, the bold amber outline
 and the readout panel were both confirmed, and the readout's numbers hand-checked: axial (1,−1) →

@@ -14,7 +14,7 @@ use serde::Serialize;
 
 use crate::camera::Orbit;
 use crate::view::compass::ShowCompass;
-use crate::view::grid_render::{HexCap, HexCell, HexWall, SeaLevel, WaterSurface};
+use crate::view::grid_render::{HexCap, HexCell, HexWall, SeaLevel, ShowGridLines, WaterSurface};
 use crate::view::labels::LabelMode;
 use crate::view::selection::Selected;
 use crate::view::{GridModel, HexLayout};
@@ -89,6 +89,7 @@ pub struct Layout {
     pub inset: f32,
     pub labels: &'static str,
     pub compass: bool,
+    pub grid_lines: bool,
     pub selected: Option<[i32; 2]>,
 }
 
@@ -150,6 +151,7 @@ pub struct ReportSources<'w, 's> {
     pub sea: Res<'w, SeaLevel>,
     pub labels: Res<'w, LabelMode>,
     pub compass: Res<'w, ShowCompass>,
+    pub grid_lines: Res<'w, ShowGridLines>,
     pub selected: Res<'w, Selected>,
     pub meshes: Res<'w, Assets<Mesh>>,
     pub cell_children: Query<'w, 's, &'static Children, With<HexCell>>,
@@ -238,6 +240,7 @@ fn layout(sources: &ReportSources) -> Layout {
         inset: layout.inset,
         labels: sources.labels.name(),
         compass: sources.compass.0,
+        grid_lines: sources.grid_lines.0,
         selected: sources.selected.0.map(|c| [c.q, c.r]),
     }
 }
