@@ -618,15 +618,25 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   `main_pass_post_lighting_processing`. It ships with no build change: `index.html` already copies
   the whole `assets/shaders` directory. Caps and walls moved from `StandardMaterial` to
   `TerrainMaterial`, ten of them, differing only in base colour.
-- **The mistake worth recording: a wavelength of several hexes is invisible.** The intuition is that
-  large-scale variation across the map is what stops a run of one biome reading as tiles, so the
-  first build used a wavelength of 4.5 world units (about two hexes) with the textbook persistence
-  of 0.5. On screen it did almost nothing. The arithmetic says why — at persistence 0.5 the fourth
-  octave carries `0.125/1.875` ≈ **6.7%** of the swing, so at a 16% tint amplitude the sub-hex detail
-  moves brightness by about **one part in a hundred**. What reads as flat is a cap being uniform
-  *within itself*; a cap differing from its neighbour does not help, because the eye takes each cap
-  as one surface regardless. Fixed by pulling the coarsest octave down to ~1 hexagon (2.5 units) and
-  raising persistence to 0.6. Recorded on [[biomes]], where the original claim was corrected in place.
+- **Two mistakes worth recording, both of which shipped looking like they worked.**
+  - *The wavelength.* The intuition is that large-scale variation across the map is what stops a run
+    of one biome reading as tiles, so the first build used a wavelength of 4.5 world units (about two
+    hexes) with the textbook persistence of 0.5. What actually reads as flat is a cap being uniform
+    **within itself** — a cap differing from its neighbour does not help, because the eye takes each
+    cap as one surface regardless. Only the octaves shorter than a cap put texture inside one, and
+    persistence is what pays them. Measured over a cap's worth of surface, as a share of the swing:
+    `2.5 / 0.60 / 5 octaves` gives 26% inside a cap against 42% between caps; `1.6 / 0.80 / 6` gives
+    37% against 32%, the first setting where the texture within a cap outweighs the step between them.
+  - *The amplitude.* Summed value noise is an **average of independent values**, so it concentrates
+    about its mean like any other average, and the nominal `-1..1` is a range it essentially never
+    visits — measured, `(fbm - 0.5) * 2` has a standard deviation of 0.15. So `tint_amplitude` named a
+    tail it never reached: a nominal 22% moved typical brightness by 4%, and against a tint-off frame
+    came to a peak of **3 parts in 255**. The swing is now divided by two of its standard deviations,
+    which makes the setting mean what it says; that divisor must be re-measured whenever the octave
+    count or persistence moves.
+  - **The lesson under both is the method, not the numbers**: "it looks subtle but it's there" was
+    wrong twice, and only a pixel diff against a control frame settled it. Within-cap variation went
+    0.99 → 2.23 → 3.56 levels of 255 across the two fixes, peak 8 → 12 → 16.
 - **Noise is 3D, not 2D on the ground plane.** Two reasons: a cap and the wall below it would
   otherwise share a tint and the wall would be vertically streaked, and `GridPlane` means there is no
   fixed "ground plane" to project onto. Sampling the full world position sidesteps both.

@@ -120,15 +120,34 @@ with soft edges. The fix is noise in *world* space, which is deliberately not a 
 within a cell and so cannot align with the lattice. This is why it arrives in step 2, before any
 blending work.
 
-**What that noise has to be was got wrong first time, and the correction is worth keeping.** The
+**What that noise has to be was got wrong twice, and both corrections are worth keeping.** The
 obvious reading is that the job is large-scale variation across the map, at a wavelength of several
-hexes. Built that way it is nearly invisible: with a wavelength of four to five hexes and the
-textbook persistence of 0.5, each cap is very nearly uniform *within itself*, and uniformity within
-one face is precisely what reads as flat — a cap differing from its neighbour does not help, because
-the eye takes the whole cap as one surface either way. The coarsest octave therefore has to be about
-**one** hexagon, and the persistence 0.6 rather than 0.5, so the octaves below a cap still carry
-enough of the swing to be seen. Regional variation is then what the octaves above it, and a drag of
-the slider, supply. Measured on `biomes` at 1280x720, tint off against tint on.
+hexes. Two things are wrong with it.
+
+*The wavelength.* Built that way the effect is nearly invisible, because each cap is very nearly
+uniform **within itself**, and uniformity within one face is precisely what reads as flat — a cap
+differing from its neighbour does not help, since the eye takes each cap as one surface either way.
+Only the octaves *shorter than a cap* put texture inside a cap, and the persistence is what pays
+them. Measured over a cap's worth of surface, as a share of the total swing:
+
+| wavelength | persistence | octaves | inside a cap | between caps |
+|---|---|---|---|---|
+| 2.5 | 0.60 | 5 | 26% | 42% |
+| 1.6 | 0.80 | 6 | 37% | 32% |
+
+The second is the first setting at which the texture within a cap outweighs the step between caps,
+which is what "mottled" means.
+
+*The amplitude.* Summed value noise is an **average of independent values**, so it concentrates about
+its mean exactly as any other average does, and the nominal `-1..1` is a range it essentially never
+visits. Uncorrected, an amplitude setting names a tail it never reaches: a nominal 22% moved typical
+brightness by 4%, and measured against a tint-off frame came to a peak of **3 parts in 255** — which
+is nothing a person can see, and was reported as working before anyone looked hard. Dividing the
+swing by two of its standard deviations makes the setting mean what it says. That divisor has to be
+re-measured whenever the octave count or persistence moves.
+
+Measured on `biomes` at 1280x720, against the same frame with the tint at zero: within-cap variation
+rose from 0.99 to 3.56 levels of 255 across the two corrections, and peak difference from 8 to 16.
 
 **One shader, two paths, selected by the mesh.** Caps carry no `ATTRIBUTE_COLOR` and take their
 colour from a per-biome material; walls carry one and blend from a palette uniform. `#ifdef

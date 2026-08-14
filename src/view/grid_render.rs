@@ -222,12 +222,12 @@ pub struct TerrainLook(pub TerrainSettings);
 impl Default for TerrainLook {
     fn default() -> Self {
         Self(TerrainSettings {
-            tint_amplitude: 0.22,
-            // Close to one hexagon at `HEX_SCALE` of 1 — deliberately short. The coarsest octave has
-            // to vary across a *single* cap, because a cap that is uniform within itself is what
-            // reads as flat however much it differs from its neighbours. Regional variation is what
-            // the octaves above it and a drag of the slider supply.
-            tint_wavelength: 2.5,
+            tint_amplitude: 0.28,
+            // Under one hexagon at `HEX_SCALE` of 1 — deliberately short. Even the coarsest octave
+            // has to vary across a *single* cap, because a cap uniform within itself reads as flat
+            // however much it differs from its neighbours. Regional variation is what a drag of the
+            // slider towards the long end supplies.
+            tint_wavelength: 1.6,
         })
     }
 }
