@@ -33,6 +33,7 @@ pub struct HexViewPlugin;
 impl Plugin for HexViewPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(MaterialPlugin::<grid_render::WaterMaterial>::default())
+            .add_plugins(MaterialPlugin::<grid_render::TerrainMaterial>::default())
             .init_gizmo_group::<grid_render::GridLines>()
             .init_gizmo_group::<grid_render::Highlight>()
             .init_gizmo_group::<compass::CompassLines>()
@@ -42,6 +43,7 @@ impl Plugin for HexViewPlugin {
             .init_resource::<grid_render::SeaLevel>()
             .init_resource::<grid_render::HideSkirt>()
             .init_resource::<grid_render::BiomeBands>()
+            .init_resource::<grid_render::TerrainLook>()
             .init_resource::<framing::ResetViewRequested>()
             .add_observer(debug_ui::on_button_activate)
             .add_observer(debug_ui::on_checkbox_changed)
@@ -70,6 +72,7 @@ impl Plugin for HexViewPlugin {
                     grid_render::sync_skirts.after(grid_render::apply_sea_level),
                     // And water is half of what a biome is derived from, so this waits on it too.
                     grid_render::sync_biomes.after(grid_render::apply_sea_level),
+                    grid_render::sync_look,
                     grid_render::sync_skirt_visibility,
                     debug_ui::position_slider_thumbs,
                     // Everything that reacts to the layout changing — scale, or the orientation

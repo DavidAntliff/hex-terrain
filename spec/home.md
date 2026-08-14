@@ -48,7 +48,7 @@ Two directions of knowledge, deliberately kept apart:
   length, and an opaque graduated cut through the water where the grid ends. `status: implemented`.
 - [[biomes]]: five biomes derived from elevation and drawn procedurally — a colour each, world-space
   variation that ignores the lattice, and a perturbed blend across the wall where two of them meet.
-  `status: approved`.
+  `status: incomplete` — colour and the procedural tint are built; slope, blending and normals are not.
 - [[water]]: how a water plate is shaded — a ripple field for the sun to glitter on, and shallows
   coloured from the model's own heights rather than the depth buffer. `status: stale` — the plate is
   no longer the seven-vertex fan one constraint pins it to. The shading it owns is unaffected.

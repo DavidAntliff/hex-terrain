@@ -1,10 +1,10 @@
 //! Top-right readout for the selected hex, and the controls that drive the view.
 //!
-//! Nine controls: a button cycling the label mode (including off), a button toggling the hexagon
+//! Eleven controls: a button cycling the label mode (including off), a button toggling the hexagon
 //! orientation, checkboxes for the compass and for hiding the terrain's skirt, sliders for the sea
-//! level, the cap inset, the shoreline and the snow line, and a button that frames the whole scene
-//! from overhead. The state-carrying buttons cycle rather than offering radio lists, because this is
-//! a debug panel and a cycle is one entity and one observer arm.
+//! level, the cap inset, the shoreline, the snow line and the two tint knobs, and a button that
+//! frames the whole scene from overhead. The state-carrying buttons cycle rather than offering radio
+//! lists, because this is a debug panel and a cycle is one entity and one observer arm.
 
 use bevy::prelude::*;
 use bevy::ui::Checked;
@@ -15,7 +15,7 @@ use bevy::ui_widgets::{
 
 use super::compass::ShowCompass;
 use super::framing::ResetViewRequested;
-use super::grid_render::{BiomeBands, HideSkirt, SeaLevel};
+use super::grid_render::{BiomeBands, HideSkirt, SeaLevel, TerrainLook};
 use super::labels::LabelMode;
 use super::layout::HexLayout;
 use super::selection::Selected;
@@ -46,6 +46,12 @@ const INSET_RANGE: std::ops::RangeInclusive<f32> = 0.0..=50.0;
 /// stay where [`Bands::default`] puts them.
 const BAND_RANGE: std::ops::RangeInclusive<f32> = -1.0..=1.0;
 
+/// The tint sliders' travel. Amplitude is a fraction of the biome's own colour, so half of it is
+/// already a strong effect and the top of the track is deliberately past useful. Wavelength is in
+/// world units, from well under one hexagon to most of the grid.
+const TINT_AMPLITUDE_RANGE: std::ops::RangeInclusive<f32> = 0.0..=0.5;
+const TINT_WAVELENGTH_RANGE: std::ops::RangeInclusive<f32> = 0.5..=20.0;
+
 /// The thumb's width as a percentage of the track, kept out of the travel so it cannot overhang
 /// either end.
 const THUMB_WIDTH: f32 = 9.0;
@@ -71,6 +77,8 @@ pub enum Control {
     Inset,
     Shoreline,
     SnowLine,
+    TintAmplitude,
+    TintWavelength,
     ResetView,
 }
 
@@ -78,6 +86,10 @@ pub enum Control {
 #[derive(Component)]
 pub struct ControlCaption(pub Control);
 
+// A Bevy system's arguments are its dependencies, and each of these is one resource it
+// genuinely reads. Bundling them into a `SystemParam` to satisfy the lint would hide the
+// dependency list without shortening it.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_debug_ui(
     mut commands: Commands,
     mode: Res<LabelMode>,
@@ -86,6 +98,7 @@ pub fn spawn_debug_ui(
     hide_skirt: Res<HideSkirt>,
     sea: Res<SeaLevel>,
     bands: Res<BiomeBands>,
+    look: Res<TerrainLook>,
 ) {
     commands
         .spawn((
@@ -150,6 +163,20 @@ pub fn spawn_debug_ui(
                 bands.0.snow,
                 BAND_RANGE,
                 snow_line_caption(bands.0.snow),
+            );
+            spawn_slider(
+                panel,
+                Control::TintAmplitude,
+                look.0.tint_amplitude,
+                TINT_AMPLITUDE_RANGE,
+                tint_amplitude_caption(look.0.tint_amplitude),
+            );
+            spawn_slider(
+                panel,
+                Control::TintWavelength,
+                look.0.tint_wavelength,
+                TINT_WAVELENGTH_RANGE,
+                tint_wavelength_caption(look.0.tint_wavelength),
             );
             spawn_button(panel, Control::ResetView, RESET_CAPTION.to_string());
         });
@@ -288,6 +315,16 @@ fn snow_line_caption(level: f32) -> String {
     format!("snow line: {level:+.2}")
 }
 
+fn tint_amplitude_caption(amplitude: f32) -> String {
+    format!("tint: {:.0}%", amplitude * 100.0)
+}
+
+/// In world units, which is what the shader takes — the noise is a function of world position, so
+/// this is a size and not a fraction of anything.
+fn tint_wavelength_caption(wavelength: f32) -> String {
+    format!("tint scale: {wavelength:.1}")
+}
+
 /// Puts each thumb where its value says. The widget deliberately leaves this to the caller, since
 /// it cannot know how the thumb is drawn; the travel is reduced by the thumb's own width so it
 /// stops flush with either end of the track rather than hanging over it.
@@ -349,6 +386,7 @@ pub fn on_slider_changed(
     mut sea: ResMut<SeaLevel>,
     mut layout: ResMut<HexLayout>,
     mut bands: ResMut<BiomeBands>,
+    mut look: ResMut<TerrainLook>,
 ) {
     match controls.get(change.source) {
         Ok(Control::SeaLevel) if sea.0 != change.value => sea.0 = change.value,
@@ -361,10 +399,20 @@ pub fn on_slider_changed(
         }
         Ok(Control::Shoreline) if bands.0.grass != change.value => bands.0.grass = change.value,
         Ok(Control::SnowLine) if bands.0.snow != change.value => bands.0.snow = change.value,
+        Ok(Control::TintAmplitude) if look.0.tint_amplitude != change.value => {
+            look.0.tint_amplitude = change.value
+        }
+        Ok(Control::TintWavelength) if look.0.tint_wavelength != change.value => {
+            look.0.tint_wavelength = change.value
+        }
         _ => {}
     }
 }
 
+// A Bevy system's arguments are its dependencies, and each of these is one resource it
+// genuinely reads. Bundling them into a `SystemParam` to satisfy the lint would hide the
+// dependency list without shortening it.
+#[allow(clippy::too_many_arguments)]
 pub fn update_captions(
     mode: Res<LabelMode>,
     layout: Res<HexLayout>,
@@ -372,6 +420,7 @@ pub fn update_captions(
     hide_skirt: Res<HideSkirt>,
     sea: Res<SeaLevel>,
     bands: Res<BiomeBands>,
+    look: Res<TerrainLook>,
     mut captions: Query<(&ControlCaption, &mut Text)>,
 ) {
     if !mode.is_changed()
@@ -380,6 +429,7 @@ pub fn update_captions(
         && !hide_skirt.is_changed()
         && !sea.is_changed()
         && !bands.is_changed()
+        && !look.is_changed()
     {
         return;
     }
@@ -393,6 +443,8 @@ pub fn update_captions(
             Control::Inset => inset_caption(layout.inset * 100.0),
             Control::Shoreline => shoreline_caption(bands.0.grass),
             Control::SnowLine => snow_line_caption(bands.0.snow),
+            Control::TintAmplitude => tint_amplitude_caption(look.0.tint_amplitude),
+            Control::TintWavelength => tint_wavelength_caption(look.0.tint_wavelength),
             Control::ResetView => RESET_CAPTION.to_string(),
         };
     }

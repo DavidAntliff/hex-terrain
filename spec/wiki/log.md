@@ -609,3 +609,39 @@ merely against the consumer — is now in [[bevy-0-19-api]].
   verified:** dragging the two new sliders, for the same reason the inset slider was not — there is
   no pointer-injection tool here. The panel's own control count in `debug_ui.rs` was already one
   stale before this change; it is now nine in both that doc comment and `README.md`.
+
+## [2026-08-14] feature | a procedural tint, and the octave that actually matters
+
+- **A second material extension, following [[water]]'s pattern exactly.**
+  `assets/shaders/terrain.wgsl` is fragment-only, binds at 100, and calls
+  `pbr_input_from_standard_material` → mutate → `apply_pbr_lighting` →
+  `main_pass_post_lighting_processing`. It ships with no build change: `index.html` already copies
+  the whole `assets/shaders` directory. Caps and walls moved from `StandardMaterial` to
+  `TerrainMaterial`, ten of them, differing only in base colour.
+- **The mistake worth recording: a wavelength of several hexes is invisible.** The intuition is that
+  large-scale variation across the map is what stops a run of one biome reading as tiles, so the
+  first build used a wavelength of 4.5 world units (about two hexes) with the textbook persistence
+  of 0.5. On screen it did almost nothing. The arithmetic says why — at persistence 0.5 the fourth
+  octave carries `0.125/1.875` ≈ **6.7%** of the swing, so at a 16% tint amplitude the sub-hex detail
+  moves brightness by about **one part in a hundred**. What reads as flat is a cap being uniform
+  *within itself*; a cap differing from its neighbour does not help, because the eye takes each cap
+  as one surface regardless. Fixed by pulling the coarsest octave down to ~1 hexagon (2.5 units) and
+  raising persistence to 0.6. Recorded on [[biomes]], where the original claim was corrected in place.
+- **Noise is 3D, not 2D on the ground plane.** Two reasons: a cap and the wall below it would
+  otherwise share a tint and the wall would be vertically streaked, and `GridPlane` means there is no
+  fixed "ground plane" to project onto. Sampling the full world position sidesteps both.
+- **An integer avalanche, not `fract(sin(...))`.** The sine trick's quality depends on how the driver
+  evaluates `sin` at large arguments and bands visibly on some GPUs. The lattice index is shifted by
+  a large positive constant before conversion so nothing depends on how a negative value casts to
+  `u32`, and only the top 24 bits reach the float, which is what an `f32` holds exactly.
+- **Octaves step by 2.03 and are displaced, not doubled.** Exact doubling lands every octave's
+  lattice on the same integer planes, where they reinforce into a visible grid.
+- `TerrainLook` **is** the shader's settings struct rather than a parallel copy, so a field cannot be
+  added to one and forgotten in the other.
+- Verified: 99 tests, `cargo clippy --all-targets` clean, `cargo check --target
+  wasm32-unknown-unknown`. A controlled A/B on `biomes` at 1280x720 `iso`, tint 0% against tint 22%
+  with everything else equal. **Not verified:** the shader in a browser on WebGL2 — per [[water]] the
+  WGSL→GLSL translation happens there at runtime, so this is the check that counts and it is deferred
+  to the end of the procedural work. Three Bevy systems now carry
+  `#[allow(clippy::too_many_arguments)]`; each argument is a resource genuinely read, and a
+  `SystemParam` would hide the dependency list without shortening it.

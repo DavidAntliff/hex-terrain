@@ -178,6 +178,82 @@ impl MaterialExtension for WaterExtension {
     }
 }
 
+/// The material every cap and every wall is drawn with — one per biome, differing only in the base
+/// colour the extension then breaks up.
+///
+/// An extension for the same reason the water is one: the lighting, the shadows and the environment
+/// reflection are all stock, and the only thing the standard material cannot express is that two
+/// caps of one biome should not be identical.
+pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExtension>;
+
+/// What the terrain shader needs beyond a standard material. Mirrors `TerrainSettings` in
+/// `assets/shaders/terrain.wgsl`; the two are bound together by nothing but agreement, so they move
+/// in the same edit.
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType, Reflect)]
+pub struct TerrainSettings {
+    /// How far the tint may swing either side of a biome's own colour, as a fraction of it.
+    pub tint_amplitude: f32,
+    /// Size of the largest noise feature, in world units — the one number here that has a size, and
+    /// the reason this struct lives in the view rather than the model.
+    pub tint_wavelength: f32,
+}
+
+/// The material extension. Bindings start at 100 because 0-99 belong to the base material.
+#[derive(Asset, AsBindGroup, Clone, Debug, Reflect)]
+pub struct TerrainExtension {
+    #[uniform(100)]
+    pub settings: TerrainSettings,
+}
+
+impl MaterialExtension for TerrainExtension {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/terrain.wgsl".into()
+    }
+}
+
+/// Every knob the terrain shader takes, in one resource so the panel drives one thing and the
+/// materials are written from one place.
+///
+/// It *is* the shader's settings struct rather than a parallel copy of it, so a field cannot be
+/// added to one and forgotten in the other.
+#[derive(Resource, Debug, Clone, Copy, PartialEq)]
+pub struct TerrainLook(pub TerrainSettings);
+
+impl Default for TerrainLook {
+    fn default() -> Self {
+        Self(TerrainSettings {
+            tint_amplitude: 0.22,
+            // Close to one hexagon at `HEX_SCALE` of 1 — deliberately short. The coarsest octave has
+            // to vary across a *single* cap, because a cap that is uniform within itself is what
+            // reads as flat however much it differs from its neighbours. Regional variation is what
+            // the octaves above it and a drag of the slider supply.
+            tint_wavelength: 2.5,
+        })
+    }
+}
+
+/// Writes the panel's settings into every terrain material.
+///
+/// One uniform per biome, so a change touches ten materials. They are separate assets only because
+/// each carries a different base colour; everything the shader reads is identical across them.
+pub fn sync_look(
+    look: Res<TerrainLook>,
+    shared: Option<Res<SharedAssets>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
+) {
+    let Some(shared) = shared else {
+        return;
+    };
+    if !look.is_changed() {
+        return;
+    }
+    for handle in shared.cap_materials.iter().chain(&shared.wall_materials) {
+        if let Some(mut material) = materials.get_mut(handle) {
+            material.extension.settings = look.0;
+        }
+    }
+}
+
 const EDGE: Color = Color::srgb(0.35, 0.75, 0.85);
 const ACTIVE_EDGE: Color = Color::srgb(1.0, 0.78, 0.25);
 
@@ -238,8 +314,8 @@ pub struct SharedAssets {
     /// A material per biome rather than per location: the biome is the only thing that varies, so
     /// this is the smallest set that expresses it, and it keeps the caps batching in five groups
     /// rather than thirty-seven.
-    cap_materials: [Handle<StandardMaterial>; 5],
-    wall_materials: [Handle<StandardMaterial>; 5],
+    cap_materials: [Handle<TerrainMaterial>; 5],
+    wall_materials: [Handle<TerrainMaterial>; 5],
 }
 
 /// A location's water surface, so the set of them can be rebuilt when the level moves.
@@ -297,29 +373,35 @@ pub fn configure_gizmo_widths(mut store: ResMut<GizmoConfigStore>) {
 }
 
 /// Spawns a cell per location: a parent carrying the transform, with a cap and a wall under it.
+// A Bevy system's arguments are its dependencies, and each of these is one resource it
+// genuinely reads. Bundling them into a `SystemParam` to satisfy the lint would hide the
+// dependency list without shortening it.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_grid(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut water_materials: ResMut<Assets<WaterMaterial>>,
+    mut terrain_materials: ResMut<Assets<TerrainMaterial>>,
     grid: Res<GridModel>,
     layout: Res<HexLayout>,
     bands: Res<BiomeBands>,
+    look: Res<TerrainLook>,
 ) {
-    let cap_materials = Biome::ALL.map(|biome| {
-        materials.add(StandardMaterial {
-            base_color: biome_fill(biome),
-            perceptual_roughness: 0.9,
-            ..default()
+    let mut surface = |colour: fn(Biome) -> Color, roughness: f32| {
+        Biome::ALL.map(|biome| {
+            terrain_materials.add(TerrainMaterial {
+                base: StandardMaterial {
+                    base_color: colour(biome),
+                    perceptual_roughness: roughness,
+                    ..default()
+                },
+                extension: TerrainExtension { settings: look.0 },
+            })
         })
-    });
-    let wall_materials = Biome::ALL.map(|biome| {
-        materials.add(StandardMaterial {
-            base_color: biome_wall_fill(biome),
-            perceptual_roughness: 0.95,
-            ..default()
-        })
-    });
+    };
+    let cap_materials = surface(biome_fill, 0.9);
+    let wall_materials = surface(biome_wall_fill, 0.95);
 
     let shared = SharedAssets {
         cap: meshes.add(hex_fan_mesh(&layout, 1.0 - layout.inset)),
@@ -592,8 +674,8 @@ pub fn sync_biomes(
     grid: Res<GridModel>,
     bands: Res<BiomeBands>,
     shared: Option<Res<SharedAssets>>,
-    mut caps: Query<(&HexCap, &mut MeshMaterial3d<StandardMaterial>), Without<HexWall>>,
-    mut walls: Query<(&HexWall, &mut MeshMaterial3d<StandardMaterial>), Without<HexCap>>,
+    mut caps: Query<(&HexCap, &mut MeshMaterial3d<TerrainMaterial>), Without<HexWall>>,
+    mut walls: Query<(&HexWall, &mut MeshMaterial3d<TerrainMaterial>), Without<HexCap>>,
 ) {
     let Some(shared) = shared else {
         return;
@@ -608,20 +690,18 @@ pub fn sync_biomes(
     };
     // Assigned only where it actually differs. Writing the same handle back would still mark the
     // component changed, and a drag of the sea-level slider moves the biome of very few locations.
-    let repaint = |material: &mut MeshMaterial3d<StandardMaterial>, wanted: &Handle<_>| {
-        if material.0 != *wanted {
-            material.0 = wanted.clone();
-        }
-    };
-
     for (cap, mut material) in &mut caps {
-        if let Some(index) = biome(cap.coord) {
-            repaint(&mut material, &shared.cap_materials[index]);
+        if let Some(index) = biome(cap.coord)
+            && material.0 != shared.cap_materials[index]
+        {
+            material.0 = shared.cap_materials[index].clone();
         }
     }
     for (wall, mut material) in &mut walls {
-        if let Some(index) = biome(wall.coord) {
-            repaint(&mut material, &shared.wall_materials[index]);
+        if let Some(index) = biome(wall.coord)
+            && material.0 != shared.wall_materials[index]
+        {
+            material.0 = shared.wall_materials[index].clone();
         }
     }
 }

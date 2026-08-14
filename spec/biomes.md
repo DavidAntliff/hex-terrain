@@ -1,7 +1,7 @@
 ---
 tags: [biomes, terrain, shader, texturing, spec]
 type: spec
-status: approved
+status: incomplete
 updated: 2026-08-14
 ---
 # Spec: Biomes and procedural surface colour
@@ -116,9 +116,19 @@ and renormalising, makes the boundary irregular and interlocking for about five 
 
 **Same-biome variation is the harder half, and the one that decides the result.** Blending boundaries
 well does nothing if every grassland cap is identical; the surface still reads as tiles, just tiles
-with soft edges. The fix is low-frequency noise in *world* space at a wavelength of several hexes,
-which is deliberately not a function of position within a cell and so cannot align with the lattice.
-This is why the noise arrives in step 2, before any blending work.
+with soft edges. The fix is noise in *world* space, which is deliberately not a function of position
+within a cell and so cannot align with the lattice. This is why it arrives in step 2, before any
+blending work.
+
+**What that noise has to be was got wrong first time, and the correction is worth keeping.** The
+obvious reading is that the job is large-scale variation across the map, at a wavelength of several
+hexes. Built that way it is nearly invisible: with a wavelength of four to five hexes and the
+textbook persistence of 0.5, each cap is very nearly uniform *within itself*, and uniformity within
+one face is precisely what reads as flat — a cap differing from its neighbour does not help, because
+the eye takes the whole cap as one surface either way. The coarsest octave therefore has to be about
+**one** hexagon, and the persistence 0.6 rather than 0.5, so the octaves below a cap still carry
+enough of the swing to be seen. Regional variation is then what the octaves above it, and a drag of
+the slider, supply. Measured on `biomes` at 1280x720, tint off against tint on.
 
 **One shader, two paths, selected by the mesh.** Caps carry no `ATTRIBUTE_COLOR` and take their
 colour from a per-biome material; walls carry one and blend from a palette uniform. `#ifdef
@@ -201,8 +211,22 @@ browser on WebGL2** — the check that counts, per the constraint above.
 
 ## Implementation status
 
-**status:** approved — design agreed, nothing built. Written before the code, so nothing has been
-verified yet; this section records what actually lands, step by step, as it does.
+**status:** incomplete — steps 1 and 2 are built and agree with this spec; steps 3 to 5 are not
+started. No divergence known.
+
+- **Step 1, per-biome colour: done.** `Biome`, `Bands` and `Biome::at` in `src/hex/biome.rs`; the
+  `biomes` scene; per-biome cap and wall materials; `HexCap`; `BiomeBands` and `sync_biomes`; the
+  shoreline and snow-line sliders.
+- **Step 2, procedural tint: done.** `assets/shaders/terrain.wgsl`, `TerrainMaterial`, `TerrainLook`
+  and `sync_look`; the tint amplitude and scale sliders. **One claim in Design discussion above was
+  wrong and has been corrected in place** rather than left to mislead: the noise's coarsest octave
+  has to be about one hexagon, not several, or it is invisible. The correction is recorded there
+  with what it was measured against.
+- **Steps 3 to 5**: slope-driven rock and crevice AO, the blend across the wall, and normal
+  perturbation. Not started.
+- **Not verified anywhere yet**: the shader in a browser on WebGL2, which per the constraints above
+  is the only check that proves the WGSL translates. Deferred to the end of the procedural work
+  rather than repeated per step.
 
 ## Related
 
